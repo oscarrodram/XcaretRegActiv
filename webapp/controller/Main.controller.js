@@ -7,8 +7,9 @@ sap.ui.define([
     "sap/m/Switch",
     "sap/m/MessageBox",
     "sap/ui/comp/smartvariants/PersonalizableInfo",
-    "sap/ui/core/BusyIndicator"
-], (Controller, Dialog, Label, Button, Input, Switch, MessageBox, PersonalizableInfo, BusyIndicator) => {
+    "sap/ui/core/BusyIndicator",
+    "com/xcaret/regactivosfijos/model/indexedDBService"
+], (Controller, Dialog, Label, Button, Input, Switch, MessageBox, PersonalizableInfo, BusyIndicator, indexedDBService) => {
     "use strict";
     var vInitialDate, vFinalDate, currentDate = new Date();
     let sUserID = "DEFAULT_USER", sFName, sLName, sEmail;
@@ -208,7 +209,7 @@ sap.ui.define([
             sSelectedTab = oEvent.getParameter("selectedKey");
             this.onInitialMainPage();
         },
-
+        /*
         onGetGeneralData: async function (bAppend = false) {
             try {
                 let url;
@@ -297,6 +298,138 @@ sap.ui.define([
                 }
             } catch (error) {
                 console.error(error);
+            }
+        },
+        */
+        // Offline
+        onGetGeneralData: async function (bAppend = false) {
+            try {
+                let oModel = this.getView().getModel("serviceModel");
+                if (indexedDBService.isOnline()) {
+                    // --- Modo ONLINE: Obtener del backend y guardar en IndexedDB ---
+                    let url;
+                    let sTop = "";
+                    const oController = this;
+                    var bFilter = false;
+                    var sDates = "";
+        
+                    if ([aIdEBELN, aIdPSPNR, aIdCONTRA, aIdUSER].every(val => val?.length === 0)) {
+                        url = `${host}/ScheduleLine`;
+                    } else {
+                        url = this.createUrl();
+                        bFilter = true;
+                    }
+        
+                    var sTypeProg = this.byId("idTipoSelect").getSelectedKey();
+                    if (sSelectedTab !== "All") {
+                        var sTabInd = this._getFilterTabIndicator(sSelectedTab);
+                        if (bFilter) {
+                            url = url + " AND (RE_TYPE EQ '" + sTypeProg + "')";
+                        } else {
+                            url = url + "?$filter=(RE_TYPE EQ '" + sTypeProg + "')";
+                        }
+                        url = url + "&$virtualFilter=GENERAL_STATUS EQ '" + sTabInd + "'";
+                        bFilter = true;
+                    } else {
+                        if (bFilter) {
+                            url = url + " AND (RE_TYPE EQ '" + sTypeProg + "')";
+                        } else {
+                            url = url + "?$filter=(RE_TYPE EQ '" + sTypeProg + "')";
+                            bFilter = true;
+                        }
+                    }
+        
+                    if ((oTop !== "" || oTop !== undefined) && (oSkip !== "" || oSkip !== undefined)) {
+                        sTop = "$top=" + oTop + "&$skip=" + oSkip;
+                    }
+        
+                    if (vInitialDate && vFinalDate) {
+                        sDates = "(CREATED_AT BETWEEN '" + vInitialDate + "' AND '" + vFinalDate + "')";
+                    }
+        
+                    if (bFilter && sDates) {
+                        url = url + " AND " + sDates;
+                    } else {
+                        if (sDates) {
+                            url = url + "?$filter=" + sDates;
+                            bFilter = true;
+                        }
+                    }
+        
+                    if (sTop) {
+                        if (bFilter) {
+                            url = url + "&" + sTop;
+                        } else {
+                            url = url + "?" + sTop;
+                        }
+                    }
+        
+                    let response = await fetch(url, { method: "GET" });
+                    if (!response.ok) throw new Error(`${response.error}`);
+                    let responseData = await response.json();
+        
+                    if (response.status === 200) {
+                        if (responseData.error === undefined) {
+                            // ========= 1. Guardar ScheduleLine principal =========
+                            const payload = responseData.result.map(obj => ({
+                                ...obj,
+                                id: obj.EBELN // IndexedDB necesita un campo 'id' único
+                            }));
+                            await indexedDBService.saveBulk(indexedDBService.STORE_NAMES.scheduleLine, payload);
+        
+                            // ========= 2. Precarga masiva de detalles =========
+                            let maxItemsToPreload = 50; // ajusta este número si lo requieres
+                            let itemsToPreload = responseData.result.slice(0, maxItemsToPreload);
+                            let detailsToSave = [];
+                            for (const item of itemsToPreload) {
+                                try {
+                                    let ebeln = item.EBELN;
+                                    let detailUrl = `${host}/ScheduleLine/${ebeln}`;
+                                    let detailResponse = await fetch(detailUrl, { method: "GET" });
+                                    let detailData = await detailResponse.json();
+                                    // Guarda el detalle en IndexedDB
+                                    detailsToSave.push({ id: ebeln, ...detailData.response });
+                                } catch (err) {
+                                    // Si falla, continúa con el siguiente
+                                    console.warn(`No se pudo precargar el detalle para EBELN ${item.EBELN}:`, err);
+                                }
+                            }
+                            // Guarda todos los detalles en IndexedDB
+                            if (detailsToSave.length > 0) {
+                                await indexedDBService.saveBulk(indexedDBService.STORE_NAMES.scheduleLineDetail, detailsToSave);
+                            }
+                            // ========= 3. Fin precarga masiva =========
+        
+                            if (oController.iTotalItems === null) {
+                                oController.iTotalItems = responseData.result.length;
+                            } else {
+                                oController.iTotalItems = oController.iTotalItems + responseData.result.length;
+                            }
+                            const aCurrentData = oModel.getProperty("/generalData") || [];
+                            const aUpdatedData = bAppend ? aCurrentData.concat(responseData.result) : responseData.result;
+                            this.onUpdateFinishedTable(aUpdatedData.length);
+                            oModel.setProperty("/generalData", this._getFormatData(aUpdatedData));
+                            oController.bIsLoading = false;
+                        } else {
+                            const aDataResult = [];
+                            this.onUpdateFinishedTable(aDataResult.length);
+                            oModel.setProperty("/generalData", aDataResult);
+                            oController.iTotalItems = aDataResult.length;
+                            oController.bIsLoading = false;
+                            sap.m.MessageToast.show(responseData.error);
+                        }
+                    }
+                } else {
+                    // --- Modo OFFLINE: Cargar desde IndexedDB ---
+                    let localData = await indexedDBService.getAll(indexedDBService.STORE_NAMES.scheduleLine);
+                    oModel.setProperty("/generalData", this._getFormatData(localData));
+                    this.onUpdateFinishedTable(localData.length);
+                    this.bIsLoading = false;
+                    sap.m.MessageToast.show("Datos cargados en modo offline");
+                }
+            } catch (error) {
+                console.error(error);
+                sap.m.MessageToast.show("Error al cargar datos (offline/online)");
             }
         },
 

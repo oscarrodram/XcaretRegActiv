@@ -58,7 +58,153 @@ sap.ui.define([
             sSelectedTab = "All";
             oEventBus.subscribe("MainChannel", "onInitialMainPage", this.onInitialMainPage, this);
             this.onGetGeneralData();
+
+            // Detectar conexión al iniciar
+            this.bIsOnline = indexedDBService.isOnline();
+            window.addEventListener("online", this._handleOnline.bind(this));
+            window.addEventListener("offline", this._handleOffline.bind(this));
+
             BusyIndicator.hide();
+        },
+
+        // Offline
+        _handleOnline: function () {
+            this.bIsOnline = true;
+            // Aquí podrías sincronizar datos pendientes si lo deseas
+            sap.m.MessageToast.show("Conectado. Sincronizando datos...");
+            // indexedDBService.syncPendingOps(processFn);
+            this.syncPendingOps();
+            this.syncPendingSignatures();
+        },
+
+        // Offline
+        _handleOffline: function () {
+            this.bIsOnline = false;
+            sap.m.MessageToast.show("Sin conexión. Trabajando en modo offline.");
+        },
+
+        // Offline
+        syncPendingOps: async function () {
+            sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], async function (indexedDBService) {
+                let pendingOps = await indexedDBService.getPendingOps();
+                let successCount = 0, errorCount = 0;
+
+                for (let op of pendingOps) {
+                    try {
+                        if (op.opType === "create" || op.opType === "update") {
+                            let url = host + `/FixedAsset`;
+                            if (op.opType === "update" && op.id) {
+                                url += "/" + op.id;
+                            }
+                            let response = await fetch(url, {
+                                method: op.opType === "create" ? "POST" : "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(op.data)
+                            });
+                            let responseData = await response.json();
+                            if (response.ok && responseData) {
+                                await indexedDBService.deletePendingOp(op.id);
+                                successCount++;
+                            } else {
+                                errorCount++;
+                                console.error("Error al sincronizar pendiente:", responseData);
+                            }
+                        }
+                    } catch (err) {
+                        errorCount++;
+                        console.error("Error al sincronizar pendiente:", err);
+                    }
+                }
+
+                // Muestra un resumen al usuario
+                if (successCount || errorCount) {
+                    let msg = `Sincronización finalizada. ${successCount} exitosas, ${errorCount} con error.`;
+                    sap.m.MessageToast.show(msg);
+                }
+            });
+        },
+
+        // Offline
+
+        syncPendingSignatures: async function () {
+            sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], async function (indexedDBService) {
+                let pendingOps = await indexedDBService.getPendingOps();
+                // Filtra solo operaciones de firmas
+                let signatureOps = pendingOps.filter(op => op.type === "Signature");
+                if (!signatureOps || signatureOps.length === 0) {
+                    sap.m.MessageToast.show("No hay firmas pendientes por sincronizar.");
+                    return;
+                }
+        
+                let successCount = 0, errorCount = 0;
+        
+                for (let op of signatureOps) {
+                    try {
+                        if (op.opType === "create") {
+                            // 1. Convierte base64 a Blob
+                            let sign = op.data;
+                            let byteString = atob(sign.image);
+                            let ab = new ArrayBuffer(byteString.length);
+                            let ia = new Uint8Array(ab);
+                            for (let i = 0; i < byteString.length; i++) {
+                                ia[i] = byteString.charCodeAt(i);
+                            }
+                            let blob = new Blob([ab], { type: sign.mimeType || "image/jpeg" });
+        
+                            // 2. Arma FormData igual que uploadSignature
+                            let formData = new FormData();
+                            formData.append("image", blob, "signature.jpeg");
+                            formData.append("metadata", JSON.stringify([{
+                                DOCID: sign.DOCID,
+                                ID: sign.ID,
+                                PROCESS: sign.PROCESS,
+                                SUBPROCESS: sign.SUBPROCESS
+                            }]));
+        
+                            // 3. Sube la firma al backend
+                            let response = await fetch(host + "/ImageSignItem", {
+                                method: "POST",
+                                body: formData
+                            });
+        
+                            if (response.ok) {
+                                // Marca como sincronizada y elimina de pendientes
+                                await indexedDBService.markSignatureAsSynced(sign.id);
+                                await indexedDBService.deletePendingOp(op.id);
+                                successCount++;
+                            } else {
+                                errorCount++;
+                            }
+                        } else if (op.opType === "delete") {
+                            // 1. Elimina la firma en backend
+                            let delItem = op.data;
+                            let res = await fetch(host + "/ImageSignItem", {
+                                method: "DELETE",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify([{
+                                    DOCID: delItem.DOCID,
+                                    ID: delItem.ID,
+                                    PROCESS: delItem.PROCESS,
+                                    SUBPROCESS: delItem.SUBPROCESS
+                                }])
+                            });
+                            if (res.ok) {
+                                await indexedDBService.deletePendingOp(op.id);
+                                // También podrías eliminarla localmente si no lo has hecho antes
+                                await indexedDBService.deleteSignature(delItem.DOCID + "_" + delItem.ID + "_" + sEmail);
+                                successCount++;
+                            } else {
+                                errorCount++;
+                            }
+                        }
+                    } catch (err) {
+                        errorCount++;
+                        console.error("Error al sincronizar firma pendiente:", err);
+                    }
+                }
+        
+                sap.m.MessageToast.show(`Sincronización de firmas finalizada. ${successCount} exitosas, ${errorCount} con error.`);
+            });
         },
 
         onCalculateDatesBefore: function (days) {
@@ -312,14 +458,14 @@ sap.ui.define([
                     const oController = this;
                     var bFilter = false;
                     var sDates = "";
-        
+
                     if ([aIdEBELN, aIdPSPNR, aIdCONTRA, aIdUSER].every(val => val?.length === 0)) {
                         url = `${host}/ScheduleLine`;
                     } else {
                         url = this.createUrl();
                         bFilter = true;
                     }
-        
+
                     var sTypeProg = this.byId("idTipoSelect").getSelectedKey();
                     if (sSelectedTab !== "All") {
                         var sTabInd = this._getFilterTabIndicator(sSelectedTab);
@@ -338,15 +484,15 @@ sap.ui.define([
                             bFilter = true;
                         }
                     }
-        
+
                     if ((oTop !== "" || oTop !== undefined) && (oSkip !== "" || oSkip !== undefined)) {
                         sTop = "$top=" + oTop + "&$skip=" + oSkip;
                     }
-        
+
                     if (vInitialDate && vFinalDate) {
                         sDates = "(CREATED_AT BETWEEN '" + vInitialDate + "' AND '" + vFinalDate + "')";
                     }
-        
+
                     if (bFilter && sDates) {
                         url = url + " AND " + sDates;
                     } else {
@@ -355,7 +501,7 @@ sap.ui.define([
                             bFilter = true;
                         }
                     }
-        
+
                     if (sTop) {
                         if (bFilter) {
                             url = url + "&" + sTop;
@@ -363,11 +509,11 @@ sap.ui.define([
                             url = url + "?" + sTop;
                         }
                     }
-        
+
                     let response = await fetch(url, { method: "GET" });
                     if (!response.ok) throw new Error(`${response.error}`);
                     let responseData = await response.json();
-        
+
                     if (response.status === 200) {
                         if (responseData.error === undefined) {
                             // ========= 1. Guardar ScheduleLine principal =========
@@ -376,7 +522,7 @@ sap.ui.define([
                                 id: obj.EBELN // IndexedDB necesita un campo 'id' único
                             }));
                             await indexedDBService.saveBulk(indexedDBService.STORE_NAMES.scheduleLine, payload);
-        
+
                             // ========= 2. Precarga masiva de detalles =========
                             let maxItemsToPreload = 50; // ajusta este número si lo requieres
                             let itemsToPreload = responseData.result.slice(0, maxItemsToPreload);
@@ -399,7 +545,7 @@ sap.ui.define([
                                 await indexedDBService.saveBulk(indexedDBService.STORE_NAMES.scheduleLineDetail, detailsToSave);
                             }
                             // ========= 3. Fin precarga masiva =========
-        
+
                             if (oController.iTotalItems === null) {
                                 oController.iTotalItems = responseData.result.length;
                             } else {

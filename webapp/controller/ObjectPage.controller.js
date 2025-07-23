@@ -6,8 +6,9 @@ sap.ui.define([
     "sap/m/Token",
     "sap/m/MessageBox",
     "sap/ui/core/BusyIndicator",
-    "sap/base/i18n/Localization"
-], (Controller, JSONModel, MessageToast, Fragment, Token, MessageBox, BusyIndicator, Localization) => {
+    "sap/base/i18n/Localization",
+    "com/xcaret/regactivosfijos/model/indexedDBService"
+], (Controller, JSONModel, MessageToast, Fragment, Token, MessageBox, BusyIndicator, Localization, indexedDBService) => {
     "use strict";
     let inputsFields = [];
     let currentDate = new Date();
@@ -65,6 +66,7 @@ sap.ui.define([
     let host = "https://experiencias-xcaret-parques-s-a-p-i-de-c-v--xc-btpdev-15aca4ac6.cfapps.us10-001.hana.ondemand.com";
 
     return Controller.extend("com.xcaret.regactivosfijos.controller.ObjectPage", {
+        /*
         onInit() {
             oBuni18n = this.getOwnerComponent().getModel("i18n").getResourceBundle();
             sCurrentLanguage = oBuni18n.getText("idioma");
@@ -119,12 +121,80 @@ sap.ui.define([
             const oLocalData = this.getOwnerComponent().getModel("serviceModel");
             this.getView().setModel(oLocalData, "detailModel");
         },
+        */
+        // Offline
+        onInit: async function () {
+            oBuni18n = this.getOwnerComponent().getModel("i18n").getResourceBundle();
+            sCurrentLanguage = oBuni18n.getText("idioma");
+            var oGlobalModel = new JSONModel({
+                enabled: false,
+                lifnr_des: "",
+                lifnr: "",
+                titleProj: "",
+                xdifica: false,
+                EBELN: "",
+                STATUS_TEXT: "",
+                STATUS_ICON: "",
+                STATUS_STATE: "Success",
+                enabled_d: false
+            });
+            this.getView().setModel(oGlobalModel, "globalModel");
+
+            var sHost = window.location.hostname;
+            if (sHost.includes("btpdev")) {
+                host = "https://experiencias-xcaret-parques-s-a-p-i-de-c-v--xc-btpdev-15aca4ac6.cfapps.us10-001.hana.ondemand.com";
+            } else if (sHost.includes("qas-btp")) {
+                host = "https://node.cfapps.us10-001.hana.ondemand.com";
+            } else if (sHost.includes("prd") || sHost.includes("prod")) {
+                host = "https://node-api-prd.cfapps.us10-001.hana.ondemand.com";
+            } else if (sHost.includes("-workspaces-")) {
+                host = "https://experiencias-xcaret-parques-s-a-p-i-de-c-v--xc-btpdev-15aca4ac6.cfapps.us10-001.hana.ondemand.com";
+            }
+
+            let oModel = new sap.ui.model.json.JSONModel();
+            this.getView().setModel(oModel, "serviceModel");
+
+            this.getCurrentUserName();
+
+            var oRouter = sap.ui.core.UIComponent.getRouterFor(this);
+            oRouter.getRoute("ObjectPage").attachPatternMatched(this._onObjectMatched, this);
+
+            this.multiQuery();
+
+            oHeader = this.byId("idObjectPageHeader");
+
+            var oGlobalModel2 = new JSONModel({
+                enableds: false
+            });
+            this.getView().setModel(oGlobalModel2, "globalModelNoEditables"); //fields to process no editable
+
+            // Set the serviceModel as the detailModel in the view
+            const oLocalData = this.getOwnerComponent().getModel("serviceModel");
+            this.getView().setModel(oLocalData, "detailModel");
+
+            // ==== Precarga de fragments para soporte offline/online ====
+            this._fragments = {};
+            for (const frag of FragmentMap) {
+                try {
+                    this._fragments[frag.DialogID] = await Fragment.load({
+                        id: this.createId(frag.DialogID),
+                        name: frag.DialogRout,
+                        controller: this
+                    });
+                    this.getView().addDependent(this._fragments[frag.DialogID]);
+                } catch (e) {
+                    // Si falla la carga, puedes mostrar un mensaje de error o simplemente continuar
+                    console.warn(`No se pudo cargar el fragmento ${frag.DialogID}:`, e);
+                }
+            }
+        },
+
         onAfterRendering: function () {
             let sNameComplete = sFName + " " + sLName;
             var sVn = this.getView().byId("titleName");
             sVn.setText(sNameComplete);
         },
-
+        /*
         _onObjectMatched: function (oEvent) {
             this.bSignAuth = false; //sign
             aUpdateRequerments = [];
@@ -212,7 +282,250 @@ sap.ui.define([
                     break;
             }
         },
+        */
+        // Offline
+        _onObjectMatched: async function (oEvent) {
+            this.bSignAuth = false;
+            aUpdateRequerments = [];
+            sTotalHeader = 0.00;
+            this._scrollToHeader();
+        
+            var oTable = this.getView().byId("ItemsTable");
+            oTable.removeSelections(true);
+        
+            sObjectId = oEvent.getParameter("arguments").objectId;
+            smodeId = oEvent.getParameter("arguments").mode;
+        
+            var oMultiInputProy = this.getView().byId("IdPSPNR");
+            oMultiInputProy.removeAllTokens();
+            sValidateOnBack = false;
+        
+            // --- MODO OFFLINE ---
+            if (!window.navigator.onLine) {
+                sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], async function (indexedDBService) {
+                    let detail = await indexedDBService.getById("ScheduleLineDetail", sObjectId);
+                    if (detail) {
+                        // Enriquecer los items para asegurar homogeneidad con modo online
+                        if (detail.items) {
+                            detail.Items = this.enrichScheduleLineItems(detail.items);
+                        }
+        
+                        this.getView().getModel("serviceModel").setProperty("/ScheduleLine", detail);
+                        this.onAddTotal(detail.Items || []);
+                        this.getView().getModel("serviceModel").refresh(true);
+        
+                        // Actualiza cabecera (globalModel)
+                        var oGlobalModel = this.getView().getModel("globalModel");
+                        oGlobalModel.setProperty("/EBELN", detail.EBELN || "");
+                        oGlobalModel.setProperty("/lifnr", detail.LIFNR || "");
+                        oGlobalModel.setProperty("/lifnr_des", detail.SUP_NAME || "");
+                        oGlobalModel.setProperty("/titleProj", detail.PROJ_NAME || "");
+                        var stat = detail.GENERAL_STATUS || detail.STATUS || 1;
+                        var oStatusObj = this._getStatusObj(parseInt(stat));
+                        oGlobalModel.setProperty("/STATUS_TEXT", oStatusObj.STATUS_TEXT);
+                        oGlobalModel.setProperty("/STATUS_ICON", oStatusObj.STATUS_ICON);
+                        oGlobalModel.setProperty("/STATUS_STATE", oStatusObj.STATUS_STATE);
+                        oGlobalModel.refresh();
+        
+                        // MultiInput Proyecto
+                        var oMultiInputProy = this.getView().byId("IdPSPNR");
+                        oMultiInputProy.removeAllTokens();
+                        if (detail.ID_PEP && detail.PROJ_NAME) {
+                            oMultiInputProy.addToken(new Token({
+                                key: detail.ID_PEP,
+                                text: detail.PROJ_NAME
+                            }));
+                        }
+        
+                        // MultiInput Contrato
+                        var oMultiInputContrato = this.getView().byId("ID_CON");
+                        oMultiInputContrato.removeAllTokens();
+                        if (detail.Items && detail.Items.length > 0) {
+                            var contractItem = detail.Items.find(item => item.ID_CON && item.CON_NAME);
+                            if (contractItem) {
+                                oMultiInputContrato.addToken(new Token({
+                                    key: contractItem.ID_CON,
+                                    text: contractItem.CON_NAME
+                                }));
+                            }
+                        }
+        
+                        // MultiInput Responsable (robustez para nombre)
+                        var oMultiInputResp = this.getView().byId("IdRESP");
+                        oMultiInputResp.removeAllTokens();
+                        let completeName = detail.RESP_NAME || "";
+                        if (detail.RESP_LNAME) completeName += " " + detail.RESP_LNAME;
+                        if (detail.ERNAM && completeName) {
+                            oMultiInputResp.addToken(new Token({
+                                key: detail.ERNAM,
+                                text: completeName
+                            }));
+                        }
+        
+                        // DatePicker Programación (fecha de recepción)
+                        var oDatePicker = this.byId("IdEINDTDatePicker");
+                        if (oDatePicker) {
+                            var dateValue = detail.CREATED_AT || "";
+                            var formattedDate = dateValue ? dateValue.substring(0, 10) : "";
+                            oDatePicker.setValue(formattedDate);
+                        }
+        
+                        // DatePicker Contabilización
+                        var oDatePicker2 = this.byId("IdEINDTDatePicker2");
+                        if (oDatePicker2) {
+                            oDatePicker2.setValue(detail.BUDAT || "");
+                        }
+                    } else {
+                        sap.m.MessageToast.show("No hay datos offline para este documento.");
+                        this.getView().getModel("serviceModel").setProperty("/ScheduleLine", {});
+                        this.onAddTotal([]);
+                        this.getView().getModel("serviceModel").refresh(true);
+                    }
+                    BusyIndicator.hide();
+                }.bind(this));
+                return;
+            }
+        
+            // --- MODO ONLINE ---
+            this.sModeUpdate = this.getModeUpdate(sObjectId);
+            this.sModeMSEGUpdate = this.getModeUpdateMSEG ? this.getModeUpdateMSEG(sObjectId) : "";
+            this.checkSignConfiguration();
+            switch (smodeId) {
+                case "r"://Read
+                    this._clearMultiInputs();
+                    this._cleanViewFields();
+                    this.getView().byId("idBtnEdit").setVisible(true);
+                    this.byId("IdEINDTDatePicker2").setValue(currentDate.toISOString().split("T")[0]);
+                    this.byId("idBttonReference").setEnabled(false);
+                    this.onEditFields(false, smodeId);
+                    oMultiInputProy.setEnabled(false);
+                    aIdEBELN = [];
+                    aIdEBELN.push(sObjectId);
+                    this.multiQuery();
+                    this._onQuery("ProgAlmacen");
+                    this._setEnabledEditPos(false);
+                    this.enableFieldsBySign();
+                    BusyIndicator.hide();
+                    break;
+                case "c"://Copy
+                    this.onGetDetailData(sObjectId);
+                    this.onEditFields(true, smodeId);
+                    this.byId("IdERNAMInput").setValue(sUserName);
+                    this.onAddTotal([]);
+                    BusyIndicator.hide();
+                    break;
+                case "a"://Add
+                    this._clearMultiInputs();
+                    this._cleanViewFields();
+                    this.getView().byId("idBtnEdit").setVisible(false);
+                    this.byId("switchXdifica").setEnabled(false);
+                    this.byId("switchXdifica").setState(false);
+                    this.byId("idBttonReference").setEnabled(false);
+                    oMultiInputProy.setEnabled(true);
+                    let oModelZ = new sap.ui.model.json.JSONModel();
+                    this.getView().setModel(oModelZ, "serviceModel");
+                    this.multiQuery();
+                    this.onEditFields(true, smodeId);
+                    this.byId("IdEINDTDatePicker").setValue(currentDate.toISOString().split("T")[0]);
+                    this.onAddTotal([]);
+                    var oModelRol = this.getView().getModel("serviceModel");
+                    const aCurrentRole = oModelRol.getProperty("/generalRol")
+                    if (aCurrentRole) {
+                        this.validateRol(aCurrentRole);
+                    }
+                    this._setViewProperties();
+                    BusyIndicator.hide();
+                    break;
+                default:
+                    break;
+            }
+        },
 
+        // Offline
+        /**
+        * Enriquecer los items del detalle recuperado de IndexDB con los campos esperados por la vista de activos fijos
+        * @param {Array} itemsOriginal - arreglo de posiciones crudas de IndexedDB
+        * @returns {Array} - arreglo enriquecido para la tabla ItemsTable
+        */
+        enrichScheduleLineItems: function (itemsOriginal) {
+            return itemsOriginal.map(item => {
+                return {
+                    EBELP: item.EBELP || "",
+                    ID_CON: item.ID_CON || "",
+                    CONPO: item.CONPO || "",
+                    IMAG: item.IMAGE || "N/A",
+                    IMAG_ENAB: item.IMAGE ? true : false,
+                    IMAGE_SRC: item.MATNR ? (host + "/ImageMaterial/" + item.MATNR) : "",
+                    MAT_MATNR: item.MATNR || "",
+                    MAT_NAME: item.MAT_NAME || item.MAKTX1 || "",
+                    LINENAME: item.LINENAME || item.MAT_NAME || item.MATNR || "",
+                    MENGE: item.MENGE || "",
+                    QTY_AVA: item.CONTR_AVAIL || item.EBAN_AVAIL || "",
+                    QTY_DELIV: item.WEMNG || "",
+                    QTY_DELIV_COPY: item.WEMNG || "",
+                    COMMENT: item.COMMENT || "",
+                    MENGE_C: item.MENGE_C || "",
+                    MEINS: item.MEINS || item.MAT_MEINS || "",
+                    RECEP_XDIFICA: (item.EMXDI === "X") ? true : false,
+                    EINDT: item.EINDT || "",
+                    CAT_ID: item.CAT_ID || "",
+                    CAT_DESC: item.CAT_DESC || "",
+                    CATEGORY: item.CAT_DESC || "",
+                    FAM_ID: item.FAM_ID || "",
+                    FAM_DESC: item.FAM_DESC || "",
+                    FAMILY: item.FAM_DESC || "",
+                    BRA_ID: item.BRA_ID || "",
+                    BRA_DESC: item.BRA_DESC || "",
+                    BRAND: item.BRA_DESC || "",
+                    MOD_ID: item.MOD_ID || "",
+                    MOD_DESC: item.MOD_DESC || "",
+                    MODEL: item.MOD_DESC || "",
+                    DIMENSIONS: item.MAT_DIMENS || "",
+                    STANDARD_IND: (item.MAT_IND_STAN === "X") ? true : false,
+                    IND_ACT_FIJO: (item.MAT_IND_ASSET === "X") ? true : false,
+                    HERITAGE: (item.MAT_PATR === "X") ? true : false,
+                    SPECIALS: false,
+                    FFE: (item.MAT_FFE === "X") ? true : false,
+                    DIV_ID: item.DIV_ID || "",
+                    DIV_DESC: item.DIV_DESC || "",
+                    DIVISION: item.DIV_DESC || "",
+                    AREA_ID: item.AREA_ID || "",
+                    AREA_DESC: item.AREA_DESC || "",
+                    AREA: item.AREA_DESC || "",
+                    LOCATION: item.EBAN_UBICA || "",
+                    SUBLOCATION: item.REQ_SUBIC || "",
+                    REQ_SUMIN: item.EBAN_SUMIN || "",
+                    REQ_SUMIN_DESC: item.REQ_SUMIN_DESC || "",
+                    SUPPLIED: item.REQ_SUMIN_DESC || "",
+                    REQ_VISTA: item.EBAN_VISTA || "",
+                    REQ_VISTA_DESC: item.REQ_VISTA_DESC || "",
+                    VIEW: item.REQ_VISTA_DESC || "",
+                    BANFN: item.BANFN || "",
+                    BNFPO: item.BNFPO || "",
+                    ERNAM: item.ERNAM || "",
+                    CREATION_NAME: item.CREATION_NAME || "",
+                    CREATION_LNAME: item.CREATION_LNAME || "",
+                    CREATION_EMAIL: item.CREATION_EMAIL || "",
+                    STATU: item.STATU || "1",
+                    STATUS: item.STATU || "1",
+                    STATUS_TEXT: this._getStatusObj(parseInt(item.STATU || "1")).STATUS_TEXT,
+                    STATUS_ICON: this._getStatusObj(parseInt(item.STATU || "1")).STATUS_ICON,
+                    STATUS_STATE: this._getStatusObj(parseInt(item.STATU || "1")).STATUS_STATE,
+                    // Campos específicos de activos fijos:
+                    IND_ACT_FIJO: (item.MAT_IND_ASSET === "X") ? true : false,
+                    NO_ACT_FIJO: item.NO_ACT_FIJO || "",
+                    NO_SERIAL: item.NO_SERIAL || "",
+                    B_FIXEDASSET: item.B_FIXEDASSET || false,
+                    ASEG_STATUS: item.ASEG_STATUS || "",
+                    FIXED_TEXT: item.FIXED_TEXT || "",
+                    FIXED_ICON: item.FIXED_ICON || "",
+                    FIXED_STATE: item.FIXED_STATE || "",
+                    LINE_STATUS: item.LINE_STATUS || "E"
+                }
+            });
+        },
+
+        /*
         getModeUpdate: function (sDocument) {
             this._aImageSource = [];
             this._aDeleteImageSource = [];
@@ -240,8 +553,84 @@ sap.ui.define([
                 return "u"; //update
             }
         },
+        */
+        // Offline
+        getModeUpdate: async function (sDocument) {
+            this._aImageSource = [];
+            this._aDeleteImageSource = [];
+            this.sObjMBLRN = "";
+            this.aReceptMaterials = [];
 
+            // --- MODO OFFLINE ---
+            if (!window.navigator.onLine) {
+                const indexedDBService = sap.ui.require("com/xcaret/regactivosfijos/model/indexedDBService");
+                // Busca el detalle guardado en la store ScheduleLineDetail por EBELN
+                let detail = await indexedDBService.getById("ScheduleLineDetail", sDocument);
+                if (detail && detail.MBLRN) {
+                    this.sObjMBLRN = detail.MBLRN;
+                    // Guarda materiales del detalle si existen
+                    if (detail.items) {
+                        this.aReceptMaterials = detail.items;
+                    }
+                    // Carga imágenes offline (si tienes implementado este helper, si no, omite)
+                    if (typeof this._loadRecepImagesOffline === "function") {
+                        await this._loadRecepImagesOffline(this.sObjMBLRN);
+                    }
+                }
+                return "u"; //update
+            }
 
+            // --- MODO ONLINE ---
+            let url = `${host}/FixedAsset?$filter=XBLNR EQ '${sDocument}'`;
+            var aResponse = this.getDataRangesSynchronously(url);
+            var oLabRecept = this.byId("labRecept");
+            var oObjRecept = this.byId("objIdenRecept");
+            oLabRecept.setVisible(false);
+            oObjRecept.setVisible(false);
+            oObjRecept.setTitle("");
+            if (aResponse.error) {
+                return "c"; //create: no existe el documento
+            } else {
+                if (aResponse.result && aResponse.result.length > 0) {
+                    this.sObjMBLRN = aResponse.result[0].MBLRN;
+                    this.aReceptMaterials = this._getReceptMaterials(this.sObjMBLRN);
+                    if (typeof this._loadRecepImages === "function") {
+                        this._loadRecepImages(this.sObjMBLRN);
+                    }
+                    oLabRecept.setVisible(true);
+                    oObjRecept.setVisible(true);
+                    oObjRecept.setTitle(this.sObjMBLRN);
+                }
+                return "u"; //update
+            }
+        },
+        // Offline
+        /**
+         * Carga las imágenes de recepción en modo offline desde IndexedDB
+         * @param {string} sObjMBLRN - Identificador del documento de recepción
+         */
+        _loadRecepImagesOffline: async function (sObjMBLRN) {
+            var aReturn = [];
+            const indexedDBService = sap.ui.require("com/xcaret/regactivosfijos/model/indexedDBService");
+            // Todas las imágenes precargadas para este MBLRN
+            let allImages = await indexedDBService.getAll("Images");
+            let filteredImages = allImages.filter(img => img.MBLRN === sObjMBLRN);
+
+            filteredImages.forEach(img => {
+                aReturn.push({
+                    pos: img.LINE_ID,
+                    src: `data:${img.mimeType};base64,${img.data}`,
+                    fileEntry: null,
+                    filename: img.IMAGE_NAME,
+                    index: img.INDEX,
+                    ind: "e" // imagen ya existe
+                });
+            });
+
+            this._aImageSource = aReturn;
+            return;
+        },
+        /*
         getModeUpdateMSEG: function (sDocument) {
             this.sMSEGMBLRN = "";
             this.aMSEGMaterials = [];
@@ -259,7 +648,45 @@ sap.ui.define([
                 return "u"; //update
             }
         },
-
+        */
+        // Offline
+        getModeUpdateMSEG: async function (sDocument) {
+            this.sMSEGMBLRN = "";
+            this.aMSEGMaterials = [];
+        
+            if (!window.navigator.onLine) {
+                // MODO OFFLINE
+                const indexedDBService = sap.ui.require("com/xcaret/regactivosfijos/model/indexedDBService");
+                let detail = await indexedDBService.getById("ScheduleLineDetail", sDocument);
+                if (detail && detail.items) {
+                    this.sMSEGMBLRN = detail.MBLRN || sDocument;
+                    // Enriquecer los items para consistencia con online
+                    if (typeof this.enrichScheduleLineItems === "function") {
+                        this.aMSEGMaterials = this.enrichScheduleLineItems(detail.items);
+                    } else {
+                        this.aMSEGMaterials = detail.items;
+                    }
+                    return "u"; // update
+                } else {
+                    return "c"; // create: no existe el documento
+                }
+            }
+        
+            // MODO ONLINE
+            let url = `${host}/MaterialDocument?$filter=XBLNR EQ '${sDocument}'`;
+            var aResponse = this.getDataRangesSynchronously(url);
+            if (aResponse.error) {
+                return "c"; // create: no existe el documento
+            } else {
+                if (aResponse.result && aResponse.result.length > 0) {
+                    this.sMSEGMBLRN = aResponse.result[0].MBLRN;
+                    // La propia _getMSEGMaterials ya debe enriquecer los items
+                    this.aMSEGMaterials = this._getMSEGMaterials(this.sMSEGMBLRN);
+                }
+                return "u"; // update
+            }
+        },
+        /*
         _loadRecepImages: function (sObjMBLRN) {
             var aReturn = [];
             let url = `${host}/ImageMaterialReceptionItem/${sObjMBLRN}`;
@@ -283,7 +710,34 @@ sap.ui.define([
                 });
             }
         },
-
+        */
+        // Offline
+        _loadRecepImages: async function (sObjMBLRN) {
+            if (!window.navigator.onLine) {
+                // Si tienes implementado el método offline, llámalo aquí
+                if (typeof this._loadRecepImagesOffline === "function") {
+                    return await this._loadRecepImagesOffline(sObjMBLRN);
+                }
+                // Si no está implementado, simplemente retorna
+                return;
+            }
+            this._aImageSource = []; // Opcional: limpia el array antes de cargar
+            let url = `${host}/ImageMaterialReceptionItem/${sObjMBLRN}`;
+            var aResponse = this.getDataRangesSynchronously(url);
+            if (aResponse && aResponse.images && aResponse.images.length > 0) {
+                for (var i = 0; i < aResponse.images.length; i++) {
+                    this._aImageSource.push({
+                        pos: aResponse.images[i].LINE_ID,
+                        src: `data:${aResponse.images[i].mimeType};base64,${aResponse.images[i].data}`,
+                        fileEntry: null,
+                        filename: aResponse.images[i].IMAGE_NAME,
+                        index: aResponse.images[i].INDEX,
+                        ind: "e" // imagen ya existe
+                    });
+                }
+            }
+        },
+        /*
         _getReceptMaterials: function (sObjMBLRN) {
             var aReturn = [];
             let url = `${host}/FixedAsset/${sObjMBLRN}`;
@@ -308,7 +762,39 @@ sap.ui.define([
             }
             return aReturn;
         },
+        */
+        // Offline
+        /**
+         * Obtiene los materiales de recepción (soporta modo offline y online)
+         * @param {string} sObjMBLRN - Identificador del documento de recepción
+         * @returns {Array} Array de materiales recibidos
+        */
+        _getReceptMaterials: async function (sObjMBLRN) {
+            var aReturn = [];
+            if (!window.navigator.onLine) {
+                const indexedDBService = sap.ui.require("com/xcaret/regactivosfijos/model/indexedDBService");
+                // Busca por EBELN en ScheduleLineDetail
+                let detail = await indexedDBService.getById("ScheduleLineDetail", sObjMBLRN);
+                if (detail && detail.items) {
+                    this.oReceptMaterialsHeader = detail;
+                    this._updateFechaConta(detail.BUDAT);
+                    aReturn = detail.items;
+                }
+                return aReturn;
+            }
 
+            // --- MODO ONLINE ---
+            let url = `${host}/FixedAsset/${sObjMBLRN}`;
+            var aResponse = this.getDataRangesSynchronously(url);
+            if (aResponse.result && aResponse.result.length > 0 && aResponse.result[0].items) {
+                this.oReceptMaterialsHeader = aResponse.result[0];
+                this._updateFechaConta(this.oReceptMaterialsHeader.BUDAT);
+                aReturn = aResponse.result[0].items;
+            }
+            return aReturn;
+        },
+
+        /*
         _getMSEGMaterials: function (sObjMBLRN) {
             var aReturn = [];
             let url = `${host}/MaterialDocument/${sObjMBLRN}`;
@@ -318,6 +804,43 @@ sap.ui.define([
                     if (aResponse.result[0].items) {
                         this.oMSEGMaterialsHeader = aResponse.result[0];
                         aReturn = aResponse.result[0].items;
+                    }
+                }
+            }
+            return aReturn;
+        },
+        */
+        // Offline
+        /**
+         * Obtiene los materiales MSEG (soporta online y offline)
+         * @param {string} sObjMBLRN - Identificador del documento de recepción MSEG
+         * @returns {Array} Array de materiales MSEG
+         */
+        _getMSEGMaterials: async function (sObjMBLRN) {
+            var aReturn = [];
+        
+            // --- MODO OFFLINE ---
+            if (!window.navigator.onLine) {
+                const indexedDBService = sap.ui.require("com/xcaret/regactivosfijos/model/indexedDBService");
+                // Busca el detalle guardado en la store ScheduleLineDetail por MBLRN
+                let detail = await indexedDBService.getById("ScheduleLineDetail", sObjMBLRN);
+                if (detail && detail.items) {
+                    this.oMSEGMaterialsHeader = detail;
+                    // Enriquecer!
+                    aReturn = this.enrichScheduleLineItems(detail.items);
+                }
+                return aReturn;
+            }
+        
+            // --- MODO ONLINE ---
+            let url = `${host}/MaterialDocument/${sObjMBLRN}`;
+            var aResponse = this.getDataRangesSynchronously(url);
+            if (aResponse.result) {
+                if (aResponse.result.length > 0) {
+                    if (aResponse.result[0].items) {
+                        this.oMSEGMaterialsHeader = aResponse.result[0];
+                        // Enriquecer!
+                        aReturn = this.enrichScheduleLineItems(aResponse.result[0].items);
                     }
                 }
             }
@@ -2074,7 +2597,7 @@ sap.ui.define([
             oModel.refresh();
             return bReturn;
         },
-
+        /*
         _postItems: async function (oEvent) {
             var that = this;
             const oModel = this.getView().getModel("serviceModel");
@@ -2142,8 +2665,136 @@ sap.ui.define([
                 this._update(oEvent);
             }
         },
-
-
+        */
+        // Offline
+        _postItems: async function (oEvent) {
+            var that = this;
+            const oModel = this.getView().getModel("serviceModel");
+            aJsonCreate = oModel.getProperty("/ScheduleLine");
+        
+            // --- MANEJO OFFLINE ---
+            if (!window.navigator.onLine) {
+                sap.ui.require([
+                    "com/xcaret/regactivosfijos/model/indexedDBService"
+                ], async function (indexedDBService) {
+                    let opType = (that.sModeUpdate === "c") ? "create" : "update";
+                    let oPayload, sMBLRN, sKey;
+        
+                    if (opType === "create") {
+                        // Simula la obtención del MBLRN (programación almacén)
+                        var nsUrol = host + "/Ranges/query";
+                        var oResponse = that.getDataRangesSynchronously(nsUrol);
+                        if (oResponse) {
+                            var oResult = oResponse.find(objectype => objectype.OBJECT === "RECEPASSET");
+                            if (Number(oResult['COUNT']) === 0) {
+                                idProgAlmacen = Number(oResult['FROMNUMBER']);
+                            } else {
+                                idProgAlmacen = Number(oResult['COUNT']) + 1;
+                            }
+                            if (idProgAlmacen > Number(oResult['TONUMBER'])) {
+                                MessageToast.show(oBuni18n.getResourceBundle().getText("rangeFinish"));
+                                sap.ui.core.BusyIndicator.hide();
+                                return;
+                            }
+                            sMBLRN = idProgAlmacen;
+                        }
+                        oPayload = that._getPayload(sMBLRN);
+                        sKey = "TEMP_" + Date.now(); // <-- temporal para creación
+                    } else {
+                        // Update: usa SIEMPRE el MBLRN real como clave
+                        let oViewObj = that.oReceptMaterialsHeader;
+                        oPayload = that._getPayloadUpdate(oViewObj);
+                        sMBLRN = oViewObj.MBLRN;
+                        sKey = sMBLRN; // <-- MBLRN real
+                    }
+        
+                    try {
+                        // Guarda el detalle en IndexedDB (puedes guardar oPayload si prefieres)
+                        await indexedDBService.saveDetailDoc(sKey, oPayload);
+        
+                        // Guarda la operación pendiente para sincronización
+                        await indexedDBService.addPendingOp({
+                            id: sKey,
+                            type: "ScheduleLineDetail",
+                            data: oPayload,
+                            timestamp: Date.now(),
+                            opType: opType,
+                            MBLRN: sMBLRN // para facilitar la sincronización
+                        });
+        
+                        sap.ui.core.BusyIndicator.hide();
+                        sValidateOnBack = true;
+                        MessageBox.success("Datos guardados en modo offline. Se sincronizarán automáticamente al volver online.", {
+                            onClose: function () {
+                                that.onCancelEdit();
+                            }
+                        });
+                    } catch (err) {
+                        sap.ui.core.BusyIndicator.hide();
+                        sap.m.MessageBox.error("Error al guardar offline: " + err);
+                    }
+                });
+                return;
+            }
+        
+            // --- MODO ONLINE (XcaretRegActiv lógica) ---
+            if (this.sModeUpdate === "c") {
+                sValidateOnBack = true;
+                var nsUrol = host + "/Ranges/query";
+                var oResponse = this.getDataRangesSynchronously(nsUrol);
+                var sMBLRN = "";
+                if (oResponse) {
+                    var oResult = oResponse.find(objectype => objectype.OBJECT === "RECEPASSET");
+                    if (Number(oResult['COUNT']) === 0) {
+                        idProgAlmacen = Number(oResult['FROMNUMBER']);
+                    } else {
+                        idProgAlmacen = Number(oResult['COUNT']) + 1;
+                    }
+                    if (idProgAlmacen > Number(oResult['TONUMBER'])) {
+                        MessageToast.show(oBuni18n.getResourceBundle().getText("rangeFinish"));
+                        return;
+                    }
+        
+                    sMBLRN = idProgAlmacen;
+                }
+        
+                var oPayload = this._getPayload(sMBLRN);
+        
+                let response = await fetch(host + `/FixedAsset`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(oPayload)
+                });
+                let responseData = await response.json();
+                if (!response.ok) {
+                    sap.ui.core.BusyIndicator.hide();
+                    MessageBox.error(responseData.error);
+                    return responseData;
+                }
+                if (response.status === 200) {
+                    sap.ui.core.BusyIndicator.hide();
+                    var oSUrl = host + "/Ranges/update/RECEPASSET";
+                    const oSData = { COUNT: idProgAlmacen };
+                    this.updateDataCountRanges(oSUrl, oSData);
+                    //this.updateScheduleLineQuantity(); // Si tienes lógica para actualización de cantidades
+                    this.onUploadPhotos(sMBLRN); //upload images
+                    this.onDeletePhotos(); //delete
+                    var smg1 = oBuni18n.getText("msUpdated");
+                    smg1 = smg1 + " " + idProgAlmacen;
+                    MessageBox.success(smg1, {
+                        onClose: function () {
+                            that.onCancelEdit();
+                        }
+                    });
+                }
+        
+                return responseData;
+            } else if (smodeId === "r" || smodeId === "c") {
+                sValidateOnBack = true;
+                this._update(oEvent);
+            }
+        },
+        /*
         _update: async function (oEvent) {
             var that = this;
             var oViewObj = this.oReceptMaterialsHeader;
@@ -2186,6 +2837,83 @@ sap.ui.define([
             //    sap.ui.core.BusyIndicator.hide();
             //    return { error: error.message };
             //}
+        },
+        */
+        // Offlie
+        _update: async function (oEvent) {
+            var that = this;
+            var oViewObj = this.oReceptMaterialsHeader;
+            var oPayload = this._getPayloadUpdate(oViewObj);
+            var url = `${host}/FixedAsset/${oViewObj.MBLRN}`;
+        
+            // --- MANEJO OFFLINE ---
+            if (!window.navigator.onLine) {
+                sap.ui.require([
+                    "com/xcaret/regactivosfijos/model/indexedDBService"
+                ], async function (indexedDBService) {
+                    let sKey = oViewObj.MBLRN || "TEMP_" + Date.now();
+        
+                    try {
+                        // Guarda el detalle local como respaldo
+                        await indexedDBService.saveDetailDoc(sKey, oPayload);
+        
+                        // Guarda operación pendiente para sincronización (tipo update)
+                        await indexedDBService.addPendingOp({
+                            id: sKey,
+                            type: "ScheduleLineDetail",
+                            data: oPayload,
+                            timestamp: Date.now(),
+                            opType: "update"
+                        });
+        
+                        sap.ui.core.BusyIndicator.hide();
+                        MessageBox.success("Actualización guardada en modo offline. Se sincronizarán automáticamente al volver online.", {
+                            onClose: function () {
+                                that.onCancelEdit();
+                            }
+                        });
+                    } catch (err) {
+                        sap.ui.core.BusyIndicator.hide();
+                        sap.m.MessageBox.error("Error al guardar actualización offline: " + err);
+                    }
+                });
+                return;
+            }
+        
+            // --- MODO ONLINE (original XcaretRegActiv) ---
+            let response = await fetch(url, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(oPayload)
+            });
+            let responseData = await response.json();
+            if (!response.ok) {
+                sap.ui.core.BusyIndicator.hide();
+                var sMsg = "";
+                if (responseData.mensaje) {
+                    sMsg = responseData.mensaje;
+                }
+                if (responseData.error) {
+                    sMsg = responseData.error;
+                }
+                MessageBox.error(sMsg);
+                return responseData;
+            }
+            if (response.status === 200) {
+                // Puedes agregar lógica de imágenes si aplica
+                //this.onUploadPhotos(oViewObj.MBLRN);
+                //this.onDeletePhotos();
+        
+                sap.ui.core.BusyIndicator.hide();
+                var smg1 = oBuni18n.getText("msUpdated");
+                smg1 = smg1 + " " + oViewObj.MBLRN;
+                MessageBox.success(smg1, {
+                    onClose: function () {
+                        that.onCancelEdit();
+                    }
+                });
+            }
+            return responseData;
         },
         ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -2358,7 +3086,7 @@ sap.ui.define([
             var sVt = this.getView().byId("titleTotal");
             sVt.setText(num);
         },
-
+        /*
         _getPayloadUpdate: function (oViewObj) {
             var that = this;
             let idResp, respName;
@@ -2407,7 +3135,31 @@ sap.ui.define([
                 "Items": aItems
             };
         },
-
+        */
+        // Offline
+        _getPayloadUpdate: function (oViewObj) {
+            let idResp, respName;
+            const oModel = this.getView().getModel("serviceModel");
+            aJsonCreate = oModel.getProperty("/ScheduleLine");
+            var oGlobalModel = this.getView().getModel("globalModel");
+            var oMultiInputResp = this.getView().byId("IdRESP");
+            var aTokens = oMultiInputResp.getTokens();
+            aTokens.forEach(function (oToken) {
+                idResp = oToken.getKey();
+                respName = oToken.getText();
+            });
+            var aItems = this._getLinesTable(aJsonCreate, oViewObj.MBLRN);
+        
+            return {
+                "MJAHR": oViewObj.MJAHR || this.getCurrentYear(),
+                "BLDAT": oViewObj.BLDAT || this.getCurrentDate(),
+                "BUDAT": this.getSelectedDate(),
+                "SYNCRO": oViewObj.SYNCRO || "1",
+                "ERNAM": oViewObj.ERNAM,
+                "XBLNR": oViewObj.XBLNR,
+                "Items": aItems
+            };
+        },
         _getPayloadUpdateStatus: function (oViewObj) {
             var that = this;
             let idResp, respName;
@@ -2448,7 +3200,7 @@ sap.ui.define([
 
             return sStat;
         },
-
+        /*
         _getPayload: function (sMBLRN) {
             var that = this;
             let idResp, respName;
@@ -2500,6 +3252,33 @@ sap.ui.define([
                     "items": aItems
                 }
             ];
+        },
+        */
+        // Offline
+        _getPayload: function (sMBLRN) {
+            let idResp, respName;
+            const oModel = this.getView().getModel("serviceModel");
+            aJsonCreate = oModel.getProperty("/ScheduleLine");
+            var oGlobalModel = this.getView().getModel("globalModel");
+            var oMultiInputResp = this.getView().byId("IdRESP");
+            var aTokens = oMultiInputResp.getTokens();
+            aTokens.forEach(function (oToken) {
+                idResp = oToken.getKey();
+                respName = oToken.getText();
+            });
+        
+            var aItems = this._getLinesTable(aJsonCreate, sMBLRN);
+        
+            return [{
+                "MBLRN": parseInt(sMBLRN).toString(),
+                "MJAHR": this.getCurrentYear(),
+                "BLDAT": this.getCurrentDate(),
+                "BUDAT": this.getSelectedDate(),
+                "SYNCRO": "1",
+                "ERNAM": aJsonCreate.ERNAM || (aJsonCreate[0] && aJsonCreate[0].ERNAM) || "",
+                "XBLNR": oGlobalModel.getProperty("/EBELN"),
+                "Items": aItems
+            }];
         },
 
         getSelectedDate: function () {
@@ -2559,7 +3338,7 @@ sap.ui.define([
             aReturn.sort((a, b) => a.EBELP - b.EBELP);
             return aReturn;
         },
-
+        /*
         _getLineDetail: function (oLine, sMBLRN) {
             var that = this;
             var oGlobalModel = this.getView().getModel("globalModel");
@@ -2584,7 +3363,29 @@ sap.ui.define([
                 "MATNR": (oLine?.MAT_MATNR || "")
             };
         },
-
+        */
+        // Offline
+        _getLineDetail: function (oLine, sMBLRN) {
+            var oGlobalModel = this.getView().getModel("globalModel");
+            return {
+                "MBLRN": sMBLRN.toString(),
+                "LINE_ID": oLine?.EBELP_MAT || oLine?.EBELP || oLine?.LINE_ID || "",
+                "MJAHR": this.getCurrentYear(),
+                "MATNR": oLine?.MAT_MATNR || oLine?.MATNR || "",
+                "LIFNR": oGlobalModel.getProperty("/lifnr") || "",
+                "PROGN": oGlobalModel.getProperty("/EBELN") || sMBLRN,
+                "PROGP": oLine?.EBELP_MAT || oLine?.EBELP || oLine?.LINE_ID || "",
+                "ERFMG": oLine?.QTY_DELIV_COPY || oLine?.QTY_DELIV || oLine?.ERFMG || "",
+                "ERFME": oLine?.MEINS || oLine?.ERFME || "",
+                "WAERS": oLine?.WAERS || "",
+                "TEXT1": oLine?.COMMENT || oLine?.TEXT1 || "",
+                "SYNCRO": "1",
+                "BLDAT": this.getCurrentDate(),
+                "BUDAT": this.getSelectedDate(),
+                "ERNAM": oLine?.ERNAM || "",
+                "MODIF": oLine?.MODIF || ""
+            };
+        },
         _updateMENGE_C: function (aItems) {
             this.aContrData = [];
             this.aSpecData = [];
@@ -2917,7 +3718,7 @@ sap.ui.define([
             oRouter.navTo("Main", {}, true);
             history.go(-1);
         },
-
+        /*
         openValueHelpDialog: function (sFragmentName, oEvent, sDialogId) {
             Fragment.load({
                 id: this.createId(sDialogId),
@@ -2962,6 +3763,96 @@ sap.ui.define([
                 this.oMultiEditDialog.open();
             }.bind(this));
         },
+        */
+        // Offline
+        openValueHelpDialog: function (sFragmentName, oEvent, sDialogId) {
+            // SIEMPRE toma los datos actuales del modelo antes de abrir el fragmento
+            const oModel = this.getView().getModel("serviceModel");
+            oJsonCreate = oModel.getProperty("/ScheduleLine"); // objeto actualizado
+        
+            // Si el fragmento ya está cargado, úsalo
+            if (this._fragments && this._fragments[sDialogId]) {
+                this.oMultiEditDialog = this._fragments[sDialogId];
+        
+                var sFragmentId = this.createId(sDialogId);
+        
+                if (sDialogId === "myDialog") {
+                    switch (smodeId) {
+                        case "r": // Read
+                            break;
+                        case "c": // Copy
+                            break;
+                        case "a": // Add
+                            // Si necesitas setear valores, pon aquí la lógica
+                            break;
+                        default:
+                            break;
+                    }
+        
+                    // Actualiza el detalle con el item seleccionado
+                    if (oFlagPos === true) {
+                        this.onObtainPositions();
+                        oSearchQuotationPos = iIndex;
+                        let line = oJsonCreate?.Items?.[iIndex];
+                        this.onSetValuePosition(line);
+                        oFlagPos = false;
+                    }
+                    if (oSearchQuotationPos === undefined && oActualQuotationPos === undefined) {
+                        oSearchQuotationPos = oActualQuotationPos = 0;
+                    }
+                }
+                this.oMultiEditDialog.setEscapeHandler(function () {
+                    this.onCloseDialog();
+                }.bind(this));
+        
+                sap.ui.core.BusyIndicator.hide();
+                this.oMultiEditDialog.open();
+                return;
+            }
+        
+            // Si no existe el fragmento, lo carga y lo usa
+            Fragment.load({
+                id: this.createId(sDialogId),
+                name: sFragmentName,
+                controller: this
+            }).then(function (oFragment) {
+                this.oMultiEditDialog = oFragment;
+                this.getView().addDependent(this.oMultiEditDialog);
+        
+                var sFragmentId = this.createId(sDialogId);
+        
+                if (sDialogId === "myDialog") {
+                    switch (smodeId) {
+                        case "r": // Read
+                            break;
+                        case "c": // Copy
+                            break;
+                        case "a": // Add
+                            // Si necesitas setear valores, pon aquí la lógica
+                            break;
+                        default:
+                            break;
+                    }
+                    if (oFlagPos === true) {
+                        this.onObtainPositions();
+                        oSearchQuotationPos = iIndex;
+                        let line = oJsonCreate?.Items?.[iIndex];
+                        this.onSetValuePosition(line);
+                        oFlagPos = false;
+                    }
+                    if (oSearchQuotationPos === undefined && oActualQuotationPos === undefined) {
+                        oSearchQuotationPos = oActualQuotationPos = 0;
+                    }
+                }
+                this.oMultiEditDialog.setEscapeHandler(function () {
+                    this.onCloseDialog();
+                }.bind(this));
+        
+                sap.ui.core.BusyIndicator.hide();
+                this.oMultiEditDialog.open();
+            }.bind(this));
+        },
+        /*
         onCloseDialogFragment: function (oEvent) {
             this.oMultiEditDialog.close();
             this.oMultiEditDialog.destroy();
@@ -2970,6 +3861,25 @@ sap.ui.define([
             const oModel = this.getView().getModel("serviceModel");
             const aGeneralData = oModel.getProperty("/ScheduleLine");
             //this.onAddTotal(aGeneralData.items);
+        },
+        */
+        onCloseDialogFragment: function (oEvent) {
+            if (this.oMultiEditDialog) {
+                this.oMultiEditDialog.close();
+                // Si el fragmento fue precargado, NO lo destruyas
+                if (this._fragments && Object.values(this._fragments).includes(this.oMultiEditDialog)) {
+                    // Solo lo cierras, no lo destruyes
+                } else {
+                    // Si fue cargado dinámicamente, destrúyelo
+                    this.oMultiEditDialog.destroy();
+                }
+                this.oMultiEditDialog = null;
+            }
+        
+            const oModel = this.getView().getModel("serviceModel");
+            const aGeneralData = oModel.getProperty("/ScheduleLine");
+            // Si quieres actualizar el total, descomenta la línea siguiente:
+            // this.onAddTotal(aGeneralData.Items);
         },
         getCurrentUserName: function (oEvent) {
             if (sap.ushell && sap.ushell.Container) {
@@ -3548,7 +4458,7 @@ sap.ui.define([
                 that._showDialogDetail(oEvent);
             }, 50);
         },
-
+        /*
         _showDialogDetail: function (oEvent) {
             let oButton = oEvent.getSource();
             let oData = oButton.getBindingContext("serviceModel").getObject();
@@ -3562,7 +4472,29 @@ sap.ui.define([
             oFlagPos = true;
             this.openValueHelpDialog(row.DialogRout, oEvent, row.DialogID);
         },
-
+        */
+        // Offline
+        _showDialogDetail: function (oEvent) {
+            // Obtén el índice del item de la tabla seleccionado
+            let oButton = oEvent.getSource();
+            let sPath = oButton.getBindingContext("serviceModel").getPath();
+            iIndex = parseInt(sPath.split("/").pop(), 10);
+        
+            // Obtén SIEMPRE el objeto actual del modelo
+            const oModel = this.getView().getModel("serviceModel");
+            oJsonCreate = oModel.getProperty("/ScheduleLine"); // <-- Objeto completo, no solo Items
+        
+            // Busca el fragmento según el mapa
+            var row = FragmentMap.find(function (fragment) {
+                return fragment.DialogID === "myDialog";
+            });
+        
+            // Flag para indicar que se va a mostrar posición
+            oFlagPos = true;
+        
+            // Abre el fragmento con los datos actuales
+            this.openValueHelpDialog(row.DialogRout, oEvent, row.DialogID);
+        },
         onChangeRow: function (oEvent) {
             //this.onValidateQuantity();
             var sFragId = this.createId("myDialog");
@@ -4521,6 +5453,7 @@ sap.ui.define([
         },
 
         // Subir la firma a la API
+        /*
         uploadSignature: function (blob, dialog) {
             var that = this;
             var formData = new FormData();
@@ -4552,6 +5485,46 @@ sap.ui.define([
                     console.log("Firma guardada correctamente");
                     sap.m.MessageToast.show("Firma guardada con éxito.");
                     that._checkNumberOfSigns(true);
+                },
+                error: function (xhr, status, error) {
+                    console.error("Error al guardar la firma:", status, error);
+                    sap.m.MessageToast.show("Error al guardar la firma.");
+                }
+            });
+        },
+        */
+        // Offline
+        uploadSignature: function (blob, dialog) {
+            var that = this;
+            var formData = new FormData();
+            const metadataArray = [];
+        
+            // Añadir el Blob de la firma al FormData
+            formData.append("image", blob, "signature.jpeg");
+        
+            // Metadatos de la firma
+            metadataArray.push({
+                DOCID: that.sObjMBLRN, // ID del documento asociado
+                ID: that._getNextId(), // ID de aprobador/nivel
+                PROCESS: sProcess,
+                SUBPROCESS: sSubProcess
+            });
+        
+            formData.append("metadata", JSON.stringify(metadataArray));
+        
+            // Enviar la firma a la API
+            $.ajax({
+                url: host + "/ImageSignItem",
+                type: "POST",
+                data: formData,
+                async: true,
+                processData: false,
+                contentType: false,
+                success: function (response) {
+                    dialog.close();
+                    console.log("Firma guardada correctamente");
+                    sap.m.MessageToast.show("Firma guardada con éxito.");
+                    that._checkNumberOfSigns(true); // Actualiza y revisa los niveles de firmas
                 },
                 error: function (xhr, status, error) {
                     console.error("Error al guardar la firma:", status, error);
@@ -4871,13 +5844,50 @@ sap.ui.define([
                 sap.m.MessageToast.show(oBuni18n.getText("noDeleteAva"));
             }
         },
-
+        /*
         getSignCarouselModel: function (sPosition) {
             this._signImages.sort((a, b) => a.ID - b.ID);
             var oModel = new sap.ui.model.json.JSONModel(this._signImages);
             return oModel;
         },
-
+        */
+        // Offline
+        getSignCarouselModel: function () {
+            var that = this;
+            if (!window.navigator.onLine) {
+                // --- MODO OFFLINE ---
+                var oDeferred = $.Deferred();
+                sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], function (indexedDBService) {
+                    indexedDBService.getAllSignatures().then(function (aSigns) {
+                        // Filtra por el documento actual
+                        var offlineSigns = aSigns.filter(function (sign) {
+                            return sign.DOCID === that.sObjMBLRN;
+                        }).map(function (sign) {
+                            return {
+                                DOCID: sign.DOCID,
+                                src: "data:" + (sign.mimeType || "image/jpeg") + ";base64," + sign.image,
+                                ID: sign.ID,
+                                PROCESS: sign.PROCESS,
+                                SUBPROCESS: sign.SUBPROCESS,
+                                USER: sign.EMAIL,
+                                AREA: that._getIDIdentifier(sign.ID ? sign.ID.toString() : "")
+                            };
+                        });
+                        // Ordena igual que online
+                        offlineSigns.sort(function (a, b) { return a.ID - b.ID; });
+                        var oModel = new sap.ui.model.json.JSONModel(offlineSigns);
+                        oDeferred.resolve(oModel);
+                    });
+                });
+                return oDeferred.promise();
+            } else {
+                // --- MODO ONLINE (original) ---
+                this._signImages.sort((a, b) => a.ID - b.ID);
+                var oModel = new sap.ui.model.json.JSONModel(this._signImages);
+                return oModel;
+            }
+        },
+        
         _getNextId: function () {
             var aLevels = this._aApproveLevels.sort((a, b) => a.NUMAPR - b.NUMAPR);
             var aFirmas = this._signImages.filter(oItem => oItem.USER === sEmail);

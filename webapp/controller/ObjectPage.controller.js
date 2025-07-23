@@ -289,17 +289,17 @@ sap.ui.define([
             aUpdateRequerments = [];
             sTotalHeader = 0.00;
             this._scrollToHeader();
-        
+
             var oTable = this.getView().byId("ItemsTable");
             oTable.removeSelections(true);
-        
+
             sObjectId = oEvent.getParameter("arguments").objectId;
             smodeId = oEvent.getParameter("arguments").mode;
-        
+
             var oMultiInputProy = this.getView().byId("IdPSPNR");
             oMultiInputProy.removeAllTokens();
             sValidateOnBack = false;
-        
+
             // --- MODO OFFLINE ---
             if (!window.navigator.onLine) {
                 sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], async function (indexedDBService) {
@@ -309,11 +309,11 @@ sap.ui.define([
                         if (detail.items) {
                             detail.Items = this.enrichScheduleLineItems(detail.items);
                         }
-        
+
                         this.getView().getModel("serviceModel").setProperty("/ScheduleLine", detail);
                         this.onAddTotal(detail.Items || []);
                         this.getView().getModel("serviceModel").refresh(true);
-        
+
                         // Actualiza cabecera (globalModel)
                         var oGlobalModel = this.getView().getModel("globalModel");
                         oGlobalModel.setProperty("/EBELN", detail.EBELN || "");
@@ -326,7 +326,7 @@ sap.ui.define([
                         oGlobalModel.setProperty("/STATUS_ICON", oStatusObj.STATUS_ICON);
                         oGlobalModel.setProperty("/STATUS_STATE", oStatusObj.STATUS_STATE);
                         oGlobalModel.refresh();
-        
+
                         // MultiInput Proyecto
                         var oMultiInputProy = this.getView().byId("IdPSPNR");
                         oMultiInputProy.removeAllTokens();
@@ -336,7 +336,7 @@ sap.ui.define([
                                 text: detail.PROJ_NAME
                             }));
                         }
-        
+
                         // MultiInput Contrato
                         var oMultiInputContrato = this.getView().byId("ID_CON");
                         oMultiInputContrato.removeAllTokens();
@@ -349,7 +349,7 @@ sap.ui.define([
                                 }));
                             }
                         }
-        
+
                         // MultiInput Responsable (robustez para nombre)
                         var oMultiInputResp = this.getView().byId("IdRESP");
                         oMultiInputResp.removeAllTokens();
@@ -361,7 +361,7 @@ sap.ui.define([
                                 text: completeName
                             }));
                         }
-        
+
                         // DatePicker Programación (fecha de recepción)
                         var oDatePicker = this.byId("IdEINDTDatePicker");
                         if (oDatePicker) {
@@ -369,7 +369,7 @@ sap.ui.define([
                             var formattedDate = dateValue ? dateValue.substring(0, 10) : "";
                             oDatePicker.setValue(formattedDate);
                         }
-        
+
                         // DatePicker Contabilización
                         var oDatePicker2 = this.byId("IdEINDTDatePicker2");
                         if (oDatePicker2) {
@@ -385,7 +385,7 @@ sap.ui.define([
                 }.bind(this));
                 return;
             }
-        
+
             // --- MODO ONLINE ---
             this.sModeUpdate = this.getModeUpdate(sObjectId);
             this.sModeMSEGUpdate = this.getModeUpdateMSEG ? this.getModeUpdateMSEG(sObjectId) : "";
@@ -653,7 +653,7 @@ sap.ui.define([
         getModeUpdateMSEG: async function (sDocument) {
             this.sMSEGMBLRN = "";
             this.aMSEGMaterials = [];
-        
+
             if (!window.navigator.onLine) {
                 // MODO OFFLINE
                 const indexedDBService = sap.ui.require("com/xcaret/regactivosfijos/model/indexedDBService");
@@ -671,7 +671,7 @@ sap.ui.define([
                     return "c"; // create: no existe el documento
                 }
             }
-        
+
             // MODO ONLINE
             let url = `${host}/MaterialDocument?$filter=XBLNR EQ '${sDocument}'`;
             var aResponse = this.getDataRangesSynchronously(url);
@@ -818,7 +818,7 @@ sap.ui.define([
          */
         _getMSEGMaterials: async function (sObjMBLRN) {
             var aReturn = [];
-        
+
             // --- MODO OFFLINE ---
             if (!window.navigator.onLine) {
                 const indexedDBService = sap.ui.require("com/xcaret/regactivosfijos/model/indexedDBService");
@@ -831,7 +831,7 @@ sap.ui.define([
                 }
                 return aReturn;
             }
-        
+
             // --- MODO ONLINE ---
             let url = `${host}/MaterialDocument/${sObjMBLRN}`;
             var aResponse = this.getDataRangesSynchronously(url);
@@ -2671,7 +2671,7 @@ sap.ui.define([
             var that = this;
             const oModel = this.getView().getModel("serviceModel");
             aJsonCreate = oModel.getProperty("/ScheduleLine");
-        
+
             // --- MANEJO OFFLINE ---
             if (!window.navigator.onLine) {
                 sap.ui.require([
@@ -2679,7 +2679,7 @@ sap.ui.define([
                 ], async function (indexedDBService) {
                     let opType = (that.sModeUpdate === "c") ? "create" : "update";
                     let oPayload, sMBLRN, sKey;
-        
+
                     if (opType === "create") {
                         // Simula la obtención del MBLRN (programación almacén)
                         var nsUrol = host + "/Ranges/query";
@@ -2707,11 +2707,11 @@ sap.ui.define([
                         sMBLRN = oViewObj.MBLRN;
                         sKey = sMBLRN; // <-- MBLRN real
                     }
-        
+
                     try {
                         // Guarda el detalle en IndexedDB (puedes guardar oPayload si prefieres)
                         await indexedDBService.saveDetailDoc(sKey, oPayload);
-        
+
                         // Guarda la operación pendiente para sincronización
                         await indexedDBService.addPendingOp({
                             id: sKey,
@@ -2721,7 +2721,7 @@ sap.ui.define([
                             opType: opType,
                             MBLRN: sMBLRN // para facilitar la sincronización
                         });
-        
+
                         sap.ui.core.BusyIndicator.hide();
                         sValidateOnBack = true;
                         MessageBox.success("Datos guardados en modo offline. Se sincronizarán automáticamente al volver online.", {
@@ -2736,7 +2736,7 @@ sap.ui.define([
                 });
                 return;
             }
-        
+
             // --- MODO ONLINE (XcaretRegActiv lógica) ---
             if (this.sModeUpdate === "c") {
                 sValidateOnBack = true;
@@ -2754,12 +2754,12 @@ sap.ui.define([
                         MessageToast.show(oBuni18n.getResourceBundle().getText("rangeFinish"));
                         return;
                     }
-        
+
                     sMBLRN = idProgAlmacen;
                 }
-        
+
                 var oPayload = this._getPayload(sMBLRN);
-        
+
                 let response = await fetch(host + `/FixedAsset`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -2787,7 +2787,7 @@ sap.ui.define([
                         }
                     });
                 }
-        
+
                 return responseData;
             } else if (smodeId === "r" || smodeId === "c") {
                 sValidateOnBack = true;
@@ -2845,18 +2845,18 @@ sap.ui.define([
             var oViewObj = this.oReceptMaterialsHeader;
             var oPayload = this._getPayloadUpdate(oViewObj);
             var url = `${host}/FixedAsset/${oViewObj.MBLRN}`;
-        
+
             // --- MANEJO OFFLINE ---
             if (!window.navigator.onLine) {
                 sap.ui.require([
                     "com/xcaret/regactivosfijos/model/indexedDBService"
                 ], async function (indexedDBService) {
                     let sKey = oViewObj.MBLRN || "TEMP_" + Date.now();
-        
+
                     try {
                         // Guarda el detalle local como respaldo
                         await indexedDBService.saveDetailDoc(sKey, oPayload);
-        
+
                         // Guarda operación pendiente para sincronización (tipo update)
                         await indexedDBService.addPendingOp({
                             id: sKey,
@@ -2865,7 +2865,7 @@ sap.ui.define([
                             timestamp: Date.now(),
                             opType: "update"
                         });
-        
+
                         sap.ui.core.BusyIndicator.hide();
                         MessageBox.success("Actualización guardada en modo offline. Se sincronizarán automáticamente al volver online.", {
                             onClose: function () {
@@ -2879,7 +2879,7 @@ sap.ui.define([
                 });
                 return;
             }
-        
+
             // --- MODO ONLINE (original XcaretRegActiv) ---
             let response = await fetch(url, {
                 method: "PUT",
@@ -2903,7 +2903,7 @@ sap.ui.define([
                 // Puedes agregar lógica de imágenes si aplica
                 //this.onUploadPhotos(oViewObj.MBLRN);
                 //this.onDeletePhotos();
-        
+
                 sap.ui.core.BusyIndicator.hide();
                 var smg1 = oBuni18n.getText("msUpdated");
                 smg1 = smg1 + " " + oViewObj.MBLRN;
@@ -3149,7 +3149,7 @@ sap.ui.define([
                 respName = oToken.getText();
             });
             var aItems = this._getLinesTable(aJsonCreate, oViewObj.MBLRN);
-        
+
             return {
                 "MJAHR": oViewObj.MJAHR || this.getCurrentYear(),
                 "BLDAT": oViewObj.BLDAT || this.getCurrentDate(),
@@ -3266,9 +3266,9 @@ sap.ui.define([
                 idResp = oToken.getKey();
                 respName = oToken.getText();
             });
-        
+
             var aItems = this._getLinesTable(aJsonCreate, sMBLRN);
-        
+
             return [{
                 "MBLRN": parseInt(sMBLRN).toString(),
                 "MJAHR": this.getCurrentYear(),
@@ -3474,7 +3474,7 @@ sap.ui.define([
 
             return aItems;
         },
-
+        /*
         onUploadPhotos: function (sMBLRN) {
             const that = this;
 
@@ -3546,7 +3546,118 @@ sap.ui.define([
                 });
             });
         },
-
+        */
+        // Offline
+        onUploadPhotos: function (sMBLRN) {
+            const that = this;
+        
+            // Si no hay imágenes para subir, retorna
+            if (!this._aImageSource || !this._aImageSource.length) {
+                return;
+            }
+        
+            // Filtrar solo imágenes nuevas (ind === 'n')
+            const aNewImages = this._aImageSource.filter(img => img.ind === 'n');
+        
+            if (!aNewImages.length) {
+                return;
+            }
+        
+            // --- SOPORTE OFFLINE ---
+            if (!window.navigator.onLine) {
+                sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], function (indexedDBService) {
+                    aNewImages.forEach(function (imgData, index) {
+                        // Leer el archivo real para convertirlo a base64
+                        imgData.fileEntry.file(function (realFile) {
+                            const reader = new FileReader();
+                            reader.onloadend = function () {
+                                // Convertir a base64
+                                const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(reader.result)));
+                                // Guardar imagen en IndexedDB
+                                const imageObj = {
+                                    MBLRN: sMBLRN,
+                                    LINE_ID: imgData.pos,
+                                    INDEX: imgData.index,
+                                    IMAGE_NAME: realFile.name || ("CAPTURA" + (index + 1)),
+                                    mimeType: realFile.type || "image/jpeg",
+                                    data: base64,
+                                    pending: true,
+                                    source: imgData.source || "camera",
+                                    id: sMBLRN + "_" + imgData.pos + "_" + (realFile.name || ("CAPTURA" + (index + 1)))
+                                };
+                                indexedDBService.saveImage(imageObj);
+                                indexedDBService.addPendingOp({
+                                    id: imageObj.id,
+                                    type: "Image",
+                                    data: imageObj,
+                                    opType: "create",
+                                    timestamp: Date.now()
+                                });
+                                // Marcar como ya guardada localmente
+                                imgData.ind = "e";
+                            };
+                            reader.readAsArrayBuffer(realFile);
+                        }, function (error) {
+                            console.error("Error al leer archivo:", error);
+                        });
+                    });
+                    sap.m.MessageToast.show("Imágenes guardadas offline. Se sincronizarán automáticamente.");
+                });
+                return;
+            }
+        
+            // --- MODO ONLINE ---
+            const formData = new FormData();
+            const metadataArray = [];
+            let pending = aNewImages.length;
+        
+            aNewImages.forEach(function (imgData, index) {
+                imgData.fileEntry.file(function (realFile) {
+                    const reader = new FileReader();
+        
+                    reader.onloadend = function () {
+                        const blob = new Blob([new Uint8Array(reader.result)], { type: realFile.type });
+        
+                        formData.append("image", blob, realFile.name);
+        
+                        metadataArray.push({
+                            MBLRN: sMBLRN,
+                            LINE_ID: imgData.pos,
+                            INDEX: imgData.index,
+                            IMAGE_NAME: realFile.name || ("CAPTURA" + (index + 1))
+                        });
+        
+                        pending--;
+        
+                        if (pending === 0) {
+                            formData.append("metadata", JSON.stringify(metadataArray));
+        
+                            $.ajax({
+                                url: host + "/ImageMaterialReceptionItem",
+                                type: "POST",
+                                data: formData,
+                                async: false,
+                                processData: false,
+                                contentType: false,
+                                success: function (response) {
+                                    console.log("Fotos subidas correctamente");
+                                    aNewImages.forEach(img => img.ind = 'e');
+                                },
+                                error: function (xhr, status, error) {
+                                    console.error("Error al subir fotos:", status, error);
+                                }
+                            });
+                        }
+                    };
+        
+                    reader.readAsArrayBuffer(realFile);
+                }, function (error) {
+                    console.error("Error al leer archivo:", error);
+                    pending--;
+                });
+            });
+        },
+        /*
         onDeletePhotos: function () {
             var aDeleteData = this._aDeleteImageSource;
 
@@ -3569,7 +3680,56 @@ sap.ui.define([
                 }
             });
         },
-
+        */
+        // Offline
+        onDeletePhotos: function () {
+            var that = this;
+            var aDeleteData = this._aDeleteImageSource;
+        
+            if (!aDeleteData || aDeleteData.length === 0) {
+                //MessageToast.show("No hay imágenes marcadas para borrar.");
+                return;
+            }
+        
+            // --- SOPORTE OFFLINE ---
+            if (!window.navigator.onLine) {
+                sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], function (indexedDBService) {
+                    aDeleteData.forEach(function (delItem) {
+                        // Elimina imagen localmente
+                        var imageId = delItem.MBLRN + "_" + delItem.LINE_ID + "_" + delItem.INDEX;
+                        indexedDBService.deleteImage(imageId);
+                        // Registra la operación pendiente para sincronización
+                        indexedDBService.addPendingOp({
+                            id: imageId + "_del",
+                            type: "Image",
+                            data: delItem,
+                            timestamp: Date.now(),
+                            opType: "delete"
+                        });
+                    });
+                    MessageToast.show("Imágenes eliminadas offline. Se sincronizarán al volver online.");
+                    // Limpia el arreglo de borrado
+                    that._aDeleteImageSource = [];
+                });
+                return;
+            }
+        
+            // --- MODO ONLINE ---
+            $.ajax({
+                url: host + "/ImageMaterialReceptionItem",
+                method: "DELETE",
+                contentType: "application/json",
+                data: JSON.stringify(aDeleteData),
+                success: function (response) {
+                    console.log("Imágenes eliminadas correctamente.");
+                    that._aDeleteImageSource = [];
+                },
+                error: function (xhr, status, error) {
+                    console.log("Error al eliminar imágenes: " + xhr.responseText);
+                }
+            });
+        },
+        
         onDeletePic: function (oEvent) {
             var that = this;
             var sFragmentId = this.createId("myDialog");
@@ -3769,13 +3929,13 @@ sap.ui.define([
             // SIEMPRE toma los datos actuales del modelo antes de abrir el fragmento
             const oModel = this.getView().getModel("serviceModel");
             oJsonCreate = oModel.getProperty("/ScheduleLine"); // objeto actualizado
-        
+
             // Si el fragmento ya está cargado, úsalo
             if (this._fragments && this._fragments[sDialogId]) {
                 this.oMultiEditDialog = this._fragments[sDialogId];
-        
+
                 var sFragmentId = this.createId(sDialogId);
-        
+
                 if (sDialogId === "myDialog") {
                     switch (smodeId) {
                         case "r": // Read
@@ -3788,7 +3948,7 @@ sap.ui.define([
                         default:
                             break;
                     }
-        
+
                     // Actualiza el detalle con el item seleccionado
                     if (oFlagPos === true) {
                         this.onObtainPositions();
@@ -3804,12 +3964,12 @@ sap.ui.define([
                 this.oMultiEditDialog.setEscapeHandler(function () {
                     this.onCloseDialog();
                 }.bind(this));
-        
+
                 sap.ui.core.BusyIndicator.hide();
                 this.oMultiEditDialog.open();
                 return;
             }
-        
+
             // Si no existe el fragmento, lo carga y lo usa
             Fragment.load({
                 id: this.createId(sDialogId),
@@ -3818,9 +3978,9 @@ sap.ui.define([
             }).then(function (oFragment) {
                 this.oMultiEditDialog = oFragment;
                 this.getView().addDependent(this.oMultiEditDialog);
-        
+
                 var sFragmentId = this.createId(sDialogId);
-        
+
                 if (sDialogId === "myDialog") {
                     switch (smodeId) {
                         case "r": // Read
@@ -3847,7 +4007,7 @@ sap.ui.define([
                 this.oMultiEditDialog.setEscapeHandler(function () {
                     this.onCloseDialog();
                 }.bind(this));
-        
+
                 sap.ui.core.BusyIndicator.hide();
                 this.oMultiEditDialog.open();
             }.bind(this));
@@ -3875,7 +4035,7 @@ sap.ui.define([
                 }
                 this.oMultiEditDialog = null;
             }
-        
+
             const oModel = this.getView().getModel("serviceModel");
             const aGeneralData = oModel.getProperty("/ScheduleLine");
             // Si quieres actualizar el total, descomenta la línea siguiente:
@@ -4479,19 +4639,19 @@ sap.ui.define([
             let oButton = oEvent.getSource();
             let sPath = oButton.getBindingContext("serviceModel").getPath();
             iIndex = parseInt(sPath.split("/").pop(), 10);
-        
+
             // Obtén SIEMPRE el objeto actual del modelo
             const oModel = this.getView().getModel("serviceModel");
             oJsonCreate = oModel.getProperty("/ScheduleLine"); // <-- Objeto completo, no solo Items
-        
+
             // Busca el fragmento según el mapa
             var row = FragmentMap.find(function (fragment) {
                 return fragment.DialogID === "myDialog";
             });
-        
+
             // Flag para indicar que se va a mostrar posición
             oFlagPos = true;
-        
+
             // Abre el fragmento con los datos actuales
             this.openValueHelpDialog(row.DialogRout, oEvent, row.DialogID);
         },
@@ -5498,21 +5658,55 @@ sap.ui.define([
             var that = this;
             var formData = new FormData();
             const metadataArray = [];
-        
-            // Añadir el Blob de la firma al FormData
-            formData.append("image", blob, "signature.jpeg");
-        
+
             // Metadatos de la firma
-            metadataArray.push({
+            var signatureMeta = {
                 DOCID: that.sObjMBLRN, // ID del documento asociado
                 ID: that._getNextId(), // ID de aprobador/nivel
                 PROCESS: sProcess,
-                SUBPROCESS: sSubProcess
-            });
-        
+                SUBPROCESS: sSubProcess,
+                EMAIL: sEmail // para almacenamiento offline
+            };
+
+            if (!window.navigator.onLine) {
+                // ---- MODO OFFLINE ----
+                var reader = new FileReader();
+                reader.onloadend = function () {
+                    var binary = reader.result;
+                    var base64 = btoa(binary);
+
+                    var signature = {
+                        ...signatureMeta,
+                        image: base64,
+                        mimeType: "image/jpeg",
+                        pending: true
+                    };
+
+                    // Guardar firma en IndexedDB
+                    sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], function (indexedDBService) {
+                        indexedDBService.saveSignature(signature);
+                        indexedDBService.addPendingOp({
+                            id: signature.DOCID + "_" + signature.ID + "_" + sEmail,
+                            type: "Signature",
+                            data: signature,
+                            opType: "create",
+                            timestamp: Date.now()
+                        });
+                    });
+
+                    dialog.close();
+                    sap.m.MessageToast.show("Firma guardada offline. Se sincronizará automáticamente.");
+                    that._checkNumberOfSigns(true);
+                };
+                reader.readAsBinaryString(blob);
+                return;
+            }
+
+            // ---- MODO ONLINE ----
+            formData.append("image", blob, "signature.jpeg");
+            metadataArray.push(signatureMeta);
             formData.append("metadata", JSON.stringify(metadataArray));
-        
-            // Enviar la firma a la API
+
             $.ajax({
                 url: host + "/ImageSignItem",
                 type: "POST",
@@ -5524,7 +5718,7 @@ sap.ui.define([
                     dialog.close();
                     console.log("Firma guardada correctamente");
                     sap.m.MessageToast.show("Firma guardada con éxito.");
-                    that._checkNumberOfSigns(true); // Actualiza y revisa los niveles de firmas
+                    that._checkNumberOfSigns(true);
                 },
                 error: function (xhr, status, error) {
                     console.error("Error al guardar la firma:", status, error);
@@ -5813,7 +6007,7 @@ sap.ui.define([
             })
             return oCarousel;
         },
-
+        /*
         onDeleteSign: function (oEvent, oDialog) {
             var that = this;
             var oActivePage = oEvent.getSource().getParent().getContent()[0].getActivePage();
@@ -5825,6 +6019,62 @@ sap.ui.define([
                     PROCESS: oLineSelected.PROCESS,
                     SUBPROCESS: oLineSelected.SUBPROCESS
                 };
+                $.ajax({
+                    url: host + "/ImageSignItem",
+                    method: "DELETE",
+                    contentType: "application/json",
+                    data: JSON.stringify([oItem]),
+                    success: function (response) {
+                        oDialog.close();
+                        oEvent.getSource().getParent().close();
+                        sap.m.MessageToast.show(response.result);
+                        that._checkNumberOfSigns(false);
+                    }.bind(this),
+                    error: function (xhr, status, error) {
+                        sap.m.MessageToast.show(xhr.responseText);
+                    }
+                });
+            } else {
+                sap.m.MessageToast.show(oBuni18n.getText("noDeleteAva"));
+            }
+        },
+        */
+        // Offline
+        onDeleteSign: function (oEvent, oDialog) {
+            var that = this;
+            var oActivePage = oEvent.getSource().getParent().getContent()[0].getActivePage();
+            var oLineSelected = sap.ui.getCore().byId(oActivePage).getBindingContext().getObject();
+        
+            // Solo permite borrar si el usuario es el dueño de la firma
+            if (oLineSelected.USER === sEmail) {
+                var oItem = {
+                    DOCID: oLineSelected.DOCID.toString(),
+                    ID: oLineSelected.ID.toString(),
+                    PROCESS: oLineSelected.PROCESS,
+                    SUBPROCESS: oLineSelected.SUBPROCESS
+                };
+        
+                // --- Soporte OFFLINE ---
+                if (!window.navigator.onLine) {
+                    sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], function (indexedDBService) {
+                        var signatureId = oItem.DOCID + "_" + oItem.ID + "_" + sEmail;
+                        // 1. Borra la firma local
+                        indexedDBService.deleteSignature(signatureId);
+                        // 2. Registra la eliminación como operación pendiente
+                        indexedDBService.addPendingOp({
+                            id: signatureId + "_del",
+                            type: "Signature",
+                            data: oItem,
+                            timestamp: Date.now(),
+                            opType: "delete"
+                        });
+                        sap.m.MessageToast.show("Firma eliminada offline. Se sincronizará al volver online.");
+                        oDialog.close();
+                        that._checkNumberOfSigns(false);
+                    });
+                    return;
+                }
+                // --- Modo ONLINE ---
                 $.ajax({
                     url: host + "/ImageSignItem",
                     method: "DELETE",
@@ -5887,7 +6137,7 @@ sap.ui.define([
                 return oModel;
             }
         },
-        
+
         _getNextId: function () {
             var aLevels = this._aApproveLevels.sort((a, b) => a.NUMAPR - b.NUMAPR);
             var aFirmas = this._signImages.filter(oItem => oItem.USER === sEmail);

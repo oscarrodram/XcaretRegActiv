@@ -307,7 +307,18 @@ sap.ui.define([
                     if (detail) {
                         // Enriquecer los items para asegurar homogeneidad con modo online
                         if (detail.items) {
-                            detail.Items = this.enrichScheduleLineItems(detail.items);
+                            // ORIGINAL:
+                            // detail.Items = this.enrichScheduleLineItems(detail.items);
+
+                            // NUEVO SNIPPET: Expande los items por cantidad antes de enriquecer
+                            let expandedItems = [];
+                            detail.items.forEach(item => {
+                                // Determina la cantidad para expandir (usa QTY_DELIV, WEMNG o MENGE)
+                                let cantidad = parseInt(item.QTY_DELIV || item.WEMNG || item.MENGE || "1");
+                                let clones = this._getNewItemsData(cantidad, item);
+                                expandedItems = expandedItems.concat(clones);
+                            });
+                            detail.Items = this.enrichScheduleLineItems(expandedItems);
                         }
 
                         this.getView().getModel("serviceModel").setProperty("/ScheduleLine", detail);
@@ -514,7 +525,6 @@ sap.ui.define([
                     STATUS_ICON: this._getStatusObj(parseInt(item.STATU || "1")).STATUS_ICON,
                     // Offline
                     STATUS_STATE: this._normalizeValueState(this._getStatusObj(parseInt(item.STATU || "1")).STATUS_STATE),
-                    FIXED_STATE: this._normalizeValueState(item.FIXED_STATE || this._getStatusObj(parseInt(item.STATU || "1")).STATUS_STATE),
                     // Campos específicos de activos fijos:
                     IND_ACT_FIJO: (item.MAT_IND_ASSET === "X") ? true : false,
                     NO_ACT_FIJO: item.NO_ACT_FIJO || "",
@@ -523,7 +533,7 @@ sap.ui.define([
                     ASEG_STATUS: item.ASEG_STATUS || "",
                     FIXED_TEXT: item.FIXED_TEXT || "",
                     FIXED_ICON: item.FIXED_ICON || "",
-                    FIXED_STATE: item.FIXED_STATE || "",
+                    FIXED_STATE: this._normalizeValueState(item.FIXED_STATE || this._getStatusObj(parseInt(item.STATU || "1")).STATUS_STATE),
                     LINE_STATUS: item.LINE_STATUS || "E"
                 }
             });
@@ -876,7 +886,7 @@ sap.ui.define([
                 oGlobalModel.setProperty("/STATUS_STATE", this._normalizeValueState(oObj.STATUS_STATE));
                 oGlobalModel.refresh();
             }
-        
+
             if (smodeId === "r") {
                 var iStat = parseInt(oHeaderObj.GENERAL_STATUS);
                 var oObj = this._getStatusObj(iStat);
@@ -886,7 +896,7 @@ sap.ui.define([
                 oGlobalModel.setProperty("/STATUS_ICON", oObj.STATUS_ICON);
                 oGlobalModel.setProperty("/STATUS_STATE", this._normalizeValueState(oObj.STATUS_STATE));
                 oGlobalModel.refresh();
-        
+
                 //Si el encabezado se encuentra con estatus de borrados, se oculta boton de editar
                 if (iStat === 3) {
                     this.getView().byId("idBtnEdit").setVisible(false);

@@ -74,6 +74,7 @@ sap.ui.define([
             sap.m.MessageToast.show("Conectado. Sincronizando datos...");
             // indexedDBService.syncPendingOps(processFn);
             this.syncPendingOps();
+            this.syncPendingImages();
             this.syncPendingSignatures();
         },
 
@@ -125,7 +126,67 @@ sap.ui.define([
         },
 
         // Offline
+        syncPendingImages: async function () {
+            sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], async function (indexedDBService) {
+                // 1. Obtener imágenes pendientes en IndexedDB
+                let pendingImages = await indexedDBService.getPendingImages();
+                if (!pendingImages || pendingImages.length === 0) {
+                    sap.m.MessageToast.show("No hay imágenes pendientes por sincronizar.");
+                    return;
+                }
+        
+                let successCount = 0, errorCount = 0;
+                for (let img of pendingImages) {
+                    try {
+                        // 2. Convierte base64 a Blob
+                        let byteString = atob(img.data);
+                        let ab = new ArrayBuffer(byteString.length);
+                        let ia = new Uint8Array(ab);
+                        for (let i = 0; i < byteString.length; i++) {
+                            ia[i] = byteString.charCodeAt(i);
+                        }
+                        let blob = new Blob([ab], { type: img.mimeType });
+        
+                        // 3. Asegúrate que el campo INDEX esté presente
+                        let indexValue = img.index !== undefined ? img.index : img.INDEX;
+                        if (indexValue === undefined) {
+                            console.warn("Imagen pendiente sin INDEX, saltando:", img);
+                            errorCount++;
+                            continue;
+                        }
+        
+                        // 4. Arma FormData igual que en onUploadPhotos
+                        let formData = new FormData();
+                        formData.append("image", blob, img.IMAGE_NAME);
+                        formData.append("metadata", JSON.stringify([{
+                            MBLRN: img.MBLRN,
+                            LINE_ID: img.LINE_ID,
+                            INDEX: indexValue,
+                            IMAGE_NAME: img.IMAGE_NAME
+                        }]));
+        
+                        // 5. Sube la imagen al backend
+                        let response = await fetch(host + "/ImageMaterialReceptionItem", {
+                            method: "POST",
+                            body: formData
+                        });
+        
+                        if (response.ok) {
+                            await indexedDBService.markImageAsSynced(img.id || img.IMAGE_NAME);
+                            successCount++;
+                        } else {
+                            errorCount++;
+                        }
+                    } catch (err) {
+                        errorCount++;
+                    }
+                }
+        
+                sap.m.MessageToast.show(`Sincronización de imágenes finalizada. ${successCount} exitosas, ${errorCount} con error.`);
+            });
+        },
 
+        // Offline
         syncPendingSignatures: async function () {
             sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], async function (indexedDBService) {
                 let pendingOps = await indexedDBService.getPendingOps();

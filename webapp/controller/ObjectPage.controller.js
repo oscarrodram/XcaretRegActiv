@@ -324,7 +324,9 @@ sap.ui.define([
                         var oStatusObj = this._getStatusObj(parseInt(stat));
                         oGlobalModel.setProperty("/STATUS_TEXT", oStatusObj.STATUS_TEXT);
                         oGlobalModel.setProperty("/STATUS_ICON", oStatusObj.STATUS_ICON);
-                        oGlobalModel.setProperty("/STATUS_STATE", oStatusObj.STATUS_STATE);
+                        //oGlobalModel.setProperty("/STATUS_STATE", oStatusObj.STATUS_STATE);
+                        // Offline
+                        oGlobalModel.setProperty("/STATUS_STATE", this._normalizeValueState(oStatusObj.STATUS_STATE));
                         oGlobalModel.refresh();
 
                         // MultiInput Proyecto
@@ -510,7 +512,9 @@ sap.ui.define([
                     STATUS: item.STATU || "1",
                     STATUS_TEXT: this._getStatusObj(parseInt(item.STATU || "1")).STATUS_TEXT,
                     STATUS_ICON: this._getStatusObj(parseInt(item.STATU || "1")).STATUS_ICON,
-                    STATUS_STATE: this._getStatusObj(parseInt(item.STATU || "1")).STATUS_STATE,
+                    // Offline
+                    STATUS_STATE: this._normalizeValueState(this._getStatusObj(parseInt(item.STATU || "1")).STATUS_STATE),
+                    FIXED_STATE: this._normalizeValueState(item.FIXED_STATE || this._getStatusObj(parseInt(item.STATU || "1")).STATUS_STATE),
                     // Campos específicos de activos fijos:
                     IND_ACT_FIJO: (item.MAT_IND_ASSET === "X") ? true : false,
                     NO_ACT_FIJO: item.NO_ACT_FIJO || "",
@@ -523,6 +527,15 @@ sap.ui.define([
                     LINE_STATUS: item.LINE_STATUS || "E"
                 }
             });
+        },
+
+        // Offline
+        _normalizeValueState: function (state) {
+            const allowed = ["None", "Success", "Warning", "Error", "Information"];
+            if (!state || allowed.indexOf(state) === -1) {
+                return "None";
+            }
+            return state;
         },
 
         /*
@@ -860,10 +873,10 @@ sap.ui.define([
                 oGlobalModel.setProperty("/EBELN", i18.getText("TITLE_NEW"));
                 oGlobalModel.setProperty("/STATUS_TEXT", oObj.STATUS_TEXT);
                 oGlobalModel.setProperty("/STATUS_ICON", oObj.STATUS_ICON);
-                oGlobalModel.setProperty("/STATUS_STATE", oObj.STATUS_STATE);
+                oGlobalModel.setProperty("/STATUS_STATE", this._normalizeValueState(oObj.STATUS_STATE));
                 oGlobalModel.refresh();
             }
-
+        
             if (smodeId === "r") {
                 var iStat = parseInt(oHeaderObj.GENERAL_STATUS);
                 var oObj = this._getStatusObj(iStat);
@@ -871,9 +884,9 @@ sap.ui.define([
                 oGlobalModel.setProperty("/EBELN", oHeaderObj.EBELN);
                 oGlobalModel.setProperty("/STATUS_TEXT", oObj.STATUS_TEXT);
                 oGlobalModel.setProperty("/STATUS_ICON", oObj.STATUS_ICON);
-                oGlobalModel.setProperty("/STATUS_STATE", oObj.STATUS_STATE);
+                oGlobalModel.setProperty("/STATUS_STATE", this._normalizeValueState(oObj.STATUS_STATE));
                 oGlobalModel.refresh();
-
+        
                 //Si el encabezado se encuentra con estatus de borrados, se oculta boton de editar
                 if (iStat === 3) {
                     this.getView().byId("idBtnEdit").setVisible(false);
@@ -1871,7 +1884,9 @@ sap.ui.define([
                     STATUS: 1,
                     STATUS_TEXT: oLineStatus.STATUS_TEXT,
                     STATUS_ICON: oLineStatus.STATUS_ICON,
-                    STATUS_STATE: oLineStatus.STATUS_STATE
+                    //STATUS_STATE: oLineStatus.STATUS_STATE
+                    // Offline
+                    STATUS_STATE: this._normalizeValueState(oLineStatus.STATUS_STATE)
                 };
                 oItemsArray.push(oNewRow);
             });
@@ -2122,7 +2137,9 @@ sap.ui.define([
                         STATUS: data.STATU,
                         STATUS_TEXT: oLineStatus.STATUS_TEXT,
                         STATUS_ICON: oLineStatus.STATUS_ICON,
-                        STATUS_STATE: oLineStatus.STATUS_STATE,
+                        //STATUS_STATE: oLineStatus.STATUS_STATE,
+                        // Offline
+                        STATUS_STATE: this._normalizeValueState(oLineStatus.STATUS_STATE),
 
                         //MENGE: data.ANTIC1 + data.ANTIC2 + data.ANTIC3 + data.ANTIC4 + data.ANTIC5,
                         //MEINS: data.MAT_MEINS,
@@ -2188,7 +2205,7 @@ sap.ui.define([
             //title props
             this._setViewProperties(oContractItems);
         },
-
+        /*
         _getNewItemsData: function (iCant, oObj) {
             var aNewItems = [];
             for (var i = 0; i < iCant; i++) {
@@ -2211,6 +2228,36 @@ sap.ui.define([
                 oCopy['FIXED_TEXT'] = (oLineStatus.STATUS_TEXT === "Unknown") ? "" : oLineStatus.STATUS_TEXT;
                 oCopy['FIXED_ICON'] = oLineStatus.STATUS_ICON;
                 oCopy['FIXED_STATE'] = oLineStatus.STATUS_STATE;
+                aNewItems.push(oCopy);
+            }
+            return aNewItems;
+        },
+        */
+        // Offline
+        _getNewItemsData: function (iCant, oObj) {
+            var aNewItems = [];
+            // Robustez: asegúrate SIEMPRE que this.aReceptMaterials es array
+            var aReceptMaterialsSafe = Array.isArray(this.aReceptMaterials) ? this.aReceptMaterials : [];
+            for (var i = 0; i < iCant; i++) {
+                var oCopy = JSON.parse(JSON.stringify(oObj));
+                oCopy['QTY_DELIV'] = this._getFormatValueQuantity(1);
+                oCopy['copyID'] = i + 1;
+                oCopy['NO_ACT_FIJO'] = "";
+                oCopy['NO_SERIAL'] = "";
+                oCopy['B_FIXEDASSET'] = false;
+                oCopy['ASEG_STATUS'] = "";
+                var oFixed = aReceptMaterialsSafe.find(item => item.PROGP === oCopy.EBELP && item.CONT === oCopy.copyID);
+                var sStatus = "";
+                if (oFixed) {
+                    oCopy.NO_ACT_FIJO = oFixed.FIXEDASSET;
+                    oCopy.NO_SERIAL = oFixed.SERIE;
+                    oCopy.B_FIXEDASSET = true;
+                    oCopy.ASEG_STATUS = oFixed.STATUS;
+                }
+                var oLineStatus = this._getFixedStatus(oCopy.ASEG_STATUS);
+                oCopy['FIXED_TEXT'] = (oLineStatus.STATUS_TEXT === "Unknown") ? "" : oLineStatus.STATUS_TEXT;
+                oCopy['FIXED_ICON'] = oLineStatus.STATUS_ICON;
+                oCopy['FIXED_STATE'] = this._normalizeValueState(oLineStatus.STATUS_STATE);
                 aNewItems.push(oCopy);
             }
             return aNewItems;
@@ -3550,19 +3597,19 @@ sap.ui.define([
         // Offline
         onUploadPhotos: function (sMBLRN) {
             const that = this;
-        
+
             // Si no hay imágenes para subir, retorna
             if (!this._aImageSource || !this._aImageSource.length) {
                 return;
             }
-        
+
             // Filtrar solo imágenes nuevas (ind === 'n')
             const aNewImages = this._aImageSource.filter(img => img.ind === 'n');
-        
+
             if (!aNewImages.length) {
                 return;
             }
-        
+
             // --- SOPORTE OFFLINE ---
             if (!window.navigator.onLine) {
                 sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], function (indexedDBService) {
@@ -3605,33 +3652,33 @@ sap.ui.define([
                 });
                 return;
             }
-        
+
             // --- MODO ONLINE ---
             const formData = new FormData();
             const metadataArray = [];
             let pending = aNewImages.length;
-        
+
             aNewImages.forEach(function (imgData, index) {
                 imgData.fileEntry.file(function (realFile) {
                     const reader = new FileReader();
-        
+
                     reader.onloadend = function () {
                         const blob = new Blob([new Uint8Array(reader.result)], { type: realFile.type });
-        
+
                         formData.append("image", blob, realFile.name);
-        
+
                         metadataArray.push({
                             MBLRN: sMBLRN,
                             LINE_ID: imgData.pos,
                             INDEX: imgData.index,
                             IMAGE_NAME: realFile.name || ("CAPTURA" + (index + 1))
                         });
-        
+
                         pending--;
-        
+
                         if (pending === 0) {
                             formData.append("metadata", JSON.stringify(metadataArray));
-        
+
                             $.ajax({
                                 url: host + "/ImageMaterialReceptionItem",
                                 type: "POST",
@@ -3649,7 +3696,7 @@ sap.ui.define([
                             });
                         }
                     };
-        
+
                     reader.readAsArrayBuffer(realFile);
                 }, function (error) {
                     console.error("Error al leer archivo:", error);
@@ -3685,12 +3732,12 @@ sap.ui.define([
         onDeletePhotos: function () {
             var that = this;
             var aDeleteData = this._aDeleteImageSource;
-        
+
             if (!aDeleteData || aDeleteData.length === 0) {
                 //MessageToast.show("No hay imágenes marcadas para borrar.");
                 return;
             }
-        
+
             // --- SOPORTE OFFLINE ---
             if (!window.navigator.onLine) {
                 sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], function (indexedDBService) {
@@ -3713,7 +3760,7 @@ sap.ui.define([
                 });
                 return;
             }
-        
+
             // --- MODO ONLINE ---
             $.ajax({
                 url: host + "/ImageMaterialReceptionItem",
@@ -3729,7 +3776,7 @@ sap.ui.define([
                 }
             });
         },
-        
+
         onDeletePic: function (oEvent) {
             var that = this;
             var sFragmentId = this.createId("myDialog");
@@ -4129,7 +4176,7 @@ sap.ui.define([
             this.onNextPosition();
             //this.onCloseDialog();
         },
-
+        /*
         getDataRangesSynchronously: function (sUrl) {
             let oData = null;
             const xhr = new XMLHttpRequest();
@@ -4146,6 +4193,28 @@ sap.ui.define([
                 console.error("Synchronous Ranges request failed:", error);
             }
             return oData; // Return the fetched data
+        },
+        */
+        // Offline
+        getDataRangesSynchronously: function (sUrl) {
+            let oData = null;
+            const xhr = new XMLHttpRequest();
+            xhr.open("GET", sUrl, false);
+            try {
+                xhr.send();
+                if (xhr.status === 200) {
+                    oData = JSON.parse(xhr.responseText);
+                } else if (xhr.status === 404) {
+                    // Silencia el error 404, retorna objeto vacío
+                    oData = {};
+                } else {
+                    // Solo imprime error en otros casos
+                    console.error(`Error: ${xhr.status} - ${xhr.statusText}`);
+                }
+            } catch (error) {
+                console.error("Synchronous Ranges request failed:", error);
+            }
+            return oData;
         },
 
         onRowSelectionChange: function (oEvent) {
@@ -4497,7 +4566,9 @@ sap.ui.define([
                 var oLineStatus = that._getStatusObj(parseInt(line.STATU));
                 line.STATUS_TEXT = oLineStatus.STATUS_TEXT;
                 line.STATUS_ICON = oLineStatus.STATUS_ICON;
-                line.STATUS_STATE = oLineStatus.STATUS_STATE;
+                //line.STATUS_STATE = oLineStatus.STATUS_STATE;
+                // Offline
+                line.STATUS_STATE = this._normalizeValueState(oLineStatus.STATUS_STATE);
                 line.QTY_DELIV = that._getFormatValueQuantity(0);
                 /*
                 if (line.BANFN && line.BNFPO) {
@@ -6044,7 +6115,7 @@ sap.ui.define([
             var that = this;
             var oActivePage = oEvent.getSource().getParent().getContent()[0].getActivePage();
             var oLineSelected = sap.ui.getCore().byId(oActivePage).getBindingContext().getObject();
-        
+
             // Solo permite borrar si el usuario es el dueño de la firma
             if (oLineSelected.USER === sEmail) {
                 var oItem = {
@@ -6053,7 +6124,7 @@ sap.ui.define([
                     PROCESS: oLineSelected.PROCESS,
                     SUBPROCESS: oLineSelected.SUBPROCESS
                 };
-        
+
                 // --- Soporte OFFLINE ---
                 if (!window.navigator.onLine) {
                     sap.ui.require(["com/xcaret/regactivosfijos/model/indexedDBService"], function (indexedDBService) {

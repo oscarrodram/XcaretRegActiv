@@ -463,6 +463,7 @@ sap.ui.define([
         enrichScheduleLineItems: function (itemsOriginal) {
             return itemsOriginal.map(item => {
                 return {
+                    copyID: item.copyID, 
                     EBELP: item.EBELP || "",
                     ID_CON: item.ID_CON || "",
                     CONPO: item.CONPO || "",
@@ -578,6 +579,7 @@ sap.ui.define([
         },
         */
         // Offline
+        /*
         getModeUpdate: async function (sDocument) {
             this._aImageSource = [];
             this._aDeleteImageSource = [];
@@ -627,6 +629,71 @@ sap.ui.define([
                 return "u"; //update
             }
         },
+        */
+        // Método robusto para obtener el modo de actualización (online/offline)
+        getModeUpdate: async function (sDocument) {
+            this._aImageSource = [];
+            this._aDeleteImageSource = [];
+            this.sObjMBLRN = "";
+            this.aReceptMaterials = [];
+
+            // --- MODO OFFLINE ---
+            if (!window.navigator.onLine) {
+                // indexedDBService ya está importado en el controlador
+                try {
+                    let detail = await indexedDBService.getById("ScheduleLineDetail", sDocument);
+
+                    if (detail && detail.MBLRN) {
+                        this.sObjMBLRN = detail.MBLRN;
+                        // Asigna materiales si existen
+                        if (detail.items) {
+                            this.aReceptMaterials = detail.items;
+                        }
+                        // Carga imágenes offline (opcional)
+                        if (typeof this._loadRecepImagesOffline === "function") {
+                            await this._loadRecepImagesOffline(this.sObjMBLRN);
+                        }
+                        // Asigna cabecera global
+                        this.oReceptMaterialsHeader = detail;
+                        return "u"; // update
+                    }
+                    // Si no hay detalle, retorna "c" (crear)
+                    return "c";
+                } catch (e) {
+                    // Error al acceder a IndexedDB
+                    console.error("Error IndexedDB getModeUpdate:", e);
+                    return "c";
+                }
+            }
+
+            // --- MODO ONLINE ---
+            let url = `${host}/FixedAsset?$filter=XBLNR EQ '${sDocument}'`;
+            var aResponse = this.getDataRangesSynchronously(url);
+            var oLabRecept = this.byId("labRecept");
+            var oObjRecept = this.byId("objIdenRecept");
+            oLabRecept.setVisible(false);
+            oObjRecept.setVisible(false);
+            oObjRecept.setTitle("");
+            if (aResponse.error) {
+                return "c"; // create: no existe el documento
+            } else {
+                if (aResponse.result && aResponse.result.length > 0) {
+                    this.sObjMBLRN = aResponse.result[0].MBLRN;
+                    this.aReceptMaterials = await this._getReceptMaterials(this.sObjMBLRN); // await si soporte offline/online
+                    // Asigna cabecera global
+                    this.oReceptMaterialsHeader = aResponse.result[0];
+                    // Carga imágenes online
+                    if (typeof this._loadRecepImages === "function") {
+                        await this._loadRecepImages(this.sObjMBLRN);
+                    }
+                    oLabRecept.setVisible(true);
+                    oObjRecept.setVisible(true);
+                    oObjRecept.setTitle(this.sObjMBLRN);
+                    return "u"; // update
+                }
+                return "c";
+            }
+        },
         // Offline
         /**
          * Carga las imágenes de recepción en modo offline desde IndexedDB
@@ -673,6 +740,7 @@ sap.ui.define([
         },
         */
         // Offline
+        /*
         getModeUpdateMSEG: async function (sDocument) {
             this.sMSEGMBLRN = "";
             this.aMSEGMaterials = [];
@@ -707,6 +775,64 @@ sap.ui.define([
                     this.aMSEGMaterials = this._getMSEGMaterials(this.sMSEGMBLRN);
                 }
                 return "u"; // update
+            }
+        },
+        */
+        // Método robusto para obtener el modo de actualización de MSEG (online/offline)
+        getModeUpdateMSEG: async function (sDocument) {
+            this.sMSEGMBLRN = "";
+            this.aMSEGMaterials = [];
+
+            // --- MODO OFFLINE ---
+            if (!window.navigator.onLine) {
+                // Busca el detalle guardado en IndexedDB por EBELN
+                // indexedDBService ya está importado en el controlador
+                try {
+                    let detail = await indexedDBService.getById("ScheduleLineDetail", sDocument);
+
+                    if (detail && detail.MBLRN) {
+                        this.sMSEGMBLRN = detail.MBLRN;
+                        // Asigna materiales si existen
+                        if (detail.items) {
+                            // Enriquecer los items si tienes helper
+                            if (typeof this.enrichScheduleLineItems === "function") {
+                                this.aMSEGMaterials = this.enrichScheduleLineItems(detail.items);
+                            } else {
+                                this.aMSEGMaterials = detail.items;
+                            }
+                        }
+                        // Asigna cabecera global MSEG
+                        this.oMSEGMaterialsHeader = detail;
+                        return "u"; // update
+                    }
+                    // Si no hay detalle, retorna "c" (crear)
+                    return "c";
+                } catch (e) {
+                    // Error al acceder a IndexedDB
+                    console.error("Error IndexedDB getModeUpdateMSEG:", e);
+                    return "c";
+                }
+            }
+
+            // --- MODO ONLINE ---
+            let url = `${host}/MaterialDocument?$filter=XBLNR EQ '${sDocument}'`;
+            var aResponse = this.getDataRangesSynchronously(url);
+            if (aResponse.error) {
+                return "c"; // create: no existe el documento
+            } else {
+                if (aResponse.result && aResponse.result.length > 0) {
+                    this.sMSEGMBLRN = aResponse.result[0].MBLRN;
+                    // La propia _getMSEGMaterials ya debe enriquecer los items si tienes helper
+                    if (typeof this._getMSEGMaterials === "function") {
+                        this.aMSEGMaterials = await this._getMSEGMaterials(this.sMSEGMBLRN);
+                    } else {
+                        this.aMSEGMaterials = aResponse.result[0].items || [];
+                    }
+                    // Asigna cabecera global MSEG
+                    this.oMSEGMaterialsHeader = aResponse.result[0];
+                    return "u"; // update
+                }
+                return "c";
             }
         },
         /*
@@ -2724,6 +2850,7 @@ sap.ui.define([
         },
         */
         // Offline
+        /*
         _postItems: async function (oEvent) {
             var that = this;
             const oModel = this.getView().getModel("serviceModel");
@@ -2851,6 +2978,132 @@ sap.ui.define([
                 this._update(oEvent);
             }
         },
+        */
+        // Método _postitems robusto para online/offline
+        _postItems: async function (oEvent) {
+            var that = this;
+            const oModel = this.getView().getModel("serviceModel");
+            aJsonCreate = oModel.getProperty("/ScheduleLine");
+
+            // --- MANEJO OFFLINE ---
+            if (!window.navigator.onLine) {
+                sap.ui.require([
+                    "com/xcaret/regactivosfijos/model/indexedDBService"
+                ], async function (indexedDBService) {
+                    let opType = (that.sModeUpdate === "c") ? "create" : "update";
+                    let oPayload, sMBLRN, sKey;
+
+                    if (opType === "create") {
+                        // Simula la obtención del MBLRN (programación almacén)
+                        var nsUrol = host + "/Ranges/query";
+                        var oResponse = that.getDataRangesSynchronously(nsUrol);
+                        if (oResponse) {
+                            var oResult = oResponse.find(objectype => objectype.OBJECT === "RECEPASSET");
+                            if (Number(oResult['COUNT']) === 0) {
+                                idProgAlmacen = Number(oResult['FROMNUMBER']);
+                            } else {
+                                idProgAlmacen = Number(oResult['COUNT']) + 1;
+                            }
+                            if (idProgAlmacen > Number(oResult['TONUMBER'])) {
+                                MessageToast.show(oBuni18n.getResourceBundle().getText("rangeFinish"));
+                                sap.ui.core.BusyIndicator.hide();
+                                return;
+                            }
+                            sMBLRN = idProgAlmacen;
+                        }
+                        oPayload = that._getPayload(sMBLRN);
+                        sKey = "TEMP_" + Date.now(); // temporal para creación
+                    } else {
+                        // Update: usa SIEMPRE el MBLRN real como clave
+                        let oViewObj = that.oReceptMaterialsHeader;
+                        oPayload = that._getPayloadUpdate(oViewObj);
+                        sMBLRN = oViewObj.MBLRN;
+                        sKey = sMBLRN; // MBLRN real
+                    }
+
+                    try {
+                        // Guarda el detalle en IndexedDB (puedes guardar oPayload si prefieres)
+                        await indexedDBService.saveDetailDoc(sKey, oPayload);
+
+                        // Guarda la operación pendiente para sincronización
+                        await indexedDBService.addPendingOp({
+                            id: sKey,
+                            type: "ScheduleLineDetail",
+                            data: oPayload,
+                            timestamp: Date.now(),
+                            opType: opType,
+                            MBLRN: sMBLRN // para facilitar la sincronización
+                        });
+
+                        sap.ui.core.BusyIndicator.hide();
+                        sValidateOnBack = true;
+                        MessageBox.success("Datos guardados en modo offline. Se sincronizarán automáticamente al volver online.", {
+                            onClose: function () {
+                                that.onCancelEdit();
+                            }
+                        });
+                    } catch (err) {
+                        sap.ui.core.BusyIndicator.hide();
+                        sap.m.MessageBox.error("Error al guardar offline: " + err);
+                    }
+                });
+                return;
+            }
+
+            // --- MODO ONLINE ---
+            if (this.sModeUpdate === "c") {
+                sValidateOnBack = true;
+                var nsUrol = host + "/Ranges/query";
+                var oResponse = this.getDataRangesSynchronously(nsUrol);
+                var sMBLRN = "";
+                if (oResponse) {
+                    var oResult = oResponse.find(objectype => objectype.OBJECT === "RECEPASSET");
+                    if (Number(oResult['COUNT']) === 0) {
+                        idProgAlmacen = Number(oResult['FROMNUMBER']);
+                    } else {
+                        idProgAlmacen = Number(oResult['COUNT']) + 1;
+                    }
+                    if (idProgAlmacen > Number(oResult['TONUMBER'])) {
+                        MessageToast.show(oBuni18n.getResourceBundle().getText("rangeFinish"));
+                        return;
+                    }
+                    sMBLRN = idProgAlmacen;
+                }
+
+                var oPayload = this._getPayload(sMBLRN);
+
+                let response = await fetch(host + `/FixedAsset`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(oPayload)
+                });
+                let responseData = await response.json();
+                if (!response.ok) {
+                    sap.ui.core.BusyIndicator.hide();
+                    MessageBox.error(responseData.error);
+                    return responseData;
+                }
+                if (response.status === 200) {
+                    sap.ui.core.BusyIndicator.hide();
+                    var oSUrl = host + "/Ranges/update/RECEPASSET";
+                    const oSData = { COUNT: idProgAlmacen };
+                    this.updateDataCountRanges(oSUrl, oSData);
+                    this.onUploadPhotos(sMBLRN); // upload images
+                    this.onDeletePhotos(); // delete
+                    var smg1 = oBuni18n.getText("msUpdated");
+                    smg1 = smg1 + " " + idProgAlmacen;
+                    MessageBox.success(smg1, {
+                        onClose: function () {
+                            that.onCancelEdit();
+                        }
+                    });
+                }
+                return responseData;
+            } else if (smodeId === "r" || smodeId === "c") {
+                sValidateOnBack = true;
+                this._update(oEvent);
+            }
+        },
         /*
         _update: async function (oEvent) {
             var that = this;
@@ -2897,6 +3150,7 @@ sap.ui.define([
         },
         */
         // Offlie
+        /*
         _update: async function (oEvent) {
             var that = this;
             var oViewObj = this.oReceptMaterialsHeader;
@@ -2971,6 +3225,92 @@ sap.ui.define([
                 });
             }
             return responseData;
+        },
+        */
+        // Método _update robusto para online/offline
+        _update: async function (oEvent) {
+            var that = this;
+            var oViewObj = this.oReceptMaterialsHeader;
+
+            // --- Protección: Variables clave siempre definidas ---
+            if (!oViewObj || !oViewObj.MBLRN) {
+                sap.m.MessageBox.error("No se pudo obtener la cabecera del documento. Recargue la pantalla o navegue nuevamente al detalle.");
+                sap.ui.core.BusyIndicator.hide();
+                return;
+            }
+
+            var oPayload = this._getPayloadUpdate(oViewObj);
+            var url = `${host}/FixedAsset/${oViewObj.MBLRN}`;
+
+            // --- MANEJO OFFLINE ---
+            if (!window.navigator.onLine) {
+                sap.ui.require([
+                    "com/xcaret/regactivosfijos/model/indexedDBService"
+                ], async function (indexedDBService) {
+                    let sKey = oViewObj.MBLRN || "TEMP_" + Date.now();
+                    try {
+                        // Guarda el detalle local como respaldo
+                        await indexedDBService.saveDetailDoc(sKey, oPayload);
+
+                        // Guarda operación pendiente para sincronización (tipo update)
+                        await indexedDBService.addPendingOp({
+                            id: sKey,
+                            type: "ScheduleLineDetail",
+                            data: oPayload,
+                            timestamp: Date.now(),
+                            opType: "update"
+                        });
+
+                        sap.ui.core.BusyIndicator.hide();
+                        MessageBox.success("Actualización guardada en modo offline. Se sincronizarán automáticamente al volver online.", {
+                            onClose: function () {
+                                that.onCancelEdit();
+                            }
+                        });
+                    } catch (err) {
+                        sap.ui.core.BusyIndicator.hide();
+                        sap.m.MessageBox.error("Error al guardar actualización offline: " + err);
+                    }
+                });
+                return;
+            }
+
+            // --- MODO ONLINE ---
+            try {
+                let response = await fetch(url, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(oPayload)
+                });
+                let responseData = await response.json();
+                if (!response.ok) {
+                    sap.ui.core.BusyIndicator.hide();
+                    var sMsg = "";
+                    if (responseData.mensaje) {
+                        sMsg = responseData.mensaje;
+                    }
+                    if (responseData.error) {
+                        sMsg = responseData.error;
+                    }
+                    MessageBox.error(sMsg);
+                    return responseData;
+                }
+                if (response.status === 200) {
+                    sap.ui.core.BusyIndicator.hide();
+                    var smg1 = oBuni18n.getText("msUpdated");
+                    smg1 = smg1 + " " + oViewObj.MBLRN;
+                    MessageBox.success(smg1, {
+                        onClose: function () {
+                            that.onCancelEdit();
+                        }
+                    });
+                }
+                return responseData;
+            } catch (error) {
+                sap.ui.core.BusyIndicator.hide();
+                MessageBox.error("Error de red o de servidor: " + error.message);
+                return { error: error.message };
+            }
         },
         ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -3395,7 +3735,6 @@ sap.ui.define([
             aReturn.sort((a, b) => a.EBELP - b.EBELP);
             return aReturn;
         },
-        /*
         _getLineDetail: function (oLine, sMBLRN) {
             var that = this;
             var oGlobalModel = this.getView().getModel("globalModel");
@@ -3420,8 +3759,9 @@ sap.ui.define([
                 "MATNR": (oLine?.MAT_MATNR || "")
             };
         },
-        */
+        
         // Offline
+        /*
         _getLineDetail: function (oLine, sMBLRN) {
             var oGlobalModel = this.getView().getModel("globalModel");
             return {
@@ -3429,20 +3769,21 @@ sap.ui.define([
                 "LINE_ID": oLine?.EBELP_MAT || oLine?.EBELP || oLine?.LINE_ID || "",
                 "MJAHR": this.getCurrentYear(),
                 "MATNR": oLine?.MAT_MATNR || oLine?.MATNR || "",
-                "LIFNR": oGlobalModel.getProperty("/lifnr") || "",
+                //"LIFNR": oGlobalModel.getProperty("/lifnr") || "",
                 "PROGN": oGlobalModel.getProperty("/EBELN") || sMBLRN,
                 "PROGP": oLine?.EBELP_MAT || oLine?.EBELP || oLine?.LINE_ID || "",
                 "ERFMG": oLine?.QTY_DELIV_COPY || oLine?.QTY_DELIV || oLine?.ERFMG || "",
                 "ERFME": oLine?.MEINS || oLine?.ERFME || "",
                 "WAERS": oLine?.WAERS || "",
-                "TEXT1": oLine?.COMMENT || oLine?.TEXT1 || "",
-                "SYNCRO": "1",
+                //"TEXT1": oLine?.COMMENT || oLine?.TEXT1 || "",
+                //"SYNCRO": "1",
                 "BLDAT": this.getCurrentDate(),
                 "BUDAT": this.getSelectedDate(),
                 "ERNAM": oLine?.ERNAM || "",
                 "MODIF": oLine?.MODIF || ""
             };
         },
+        ¡/
         _updateMENGE_C: function (aItems) {
             this.aContrData = [];
             this.aSpecData = [];

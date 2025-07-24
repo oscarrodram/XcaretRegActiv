@@ -134,7 +134,7 @@ sap.ui.define([
                     sap.m.MessageToast.show("No hay imágenes pendientes por sincronizar.");
                     return;
                 }
-        
+
                 let successCount = 0, errorCount = 0;
                 for (let img of pendingImages) {
                     try {
@@ -146,7 +146,7 @@ sap.ui.define([
                             ia[i] = byteString.charCodeAt(i);
                         }
                         let blob = new Blob([ab], { type: img.mimeType });
-        
+
                         // 3. Asegúrate que el campo INDEX esté presente
                         let indexValue = img.index !== undefined ? img.index : img.INDEX;
                         if (indexValue === undefined) {
@@ -154,7 +154,7 @@ sap.ui.define([
                             errorCount++;
                             continue;
                         }
-        
+
                         // 4. Arma FormData igual que en onUploadPhotos
                         let formData = new FormData();
                         formData.append("image", blob, img.IMAGE_NAME);
@@ -164,13 +164,13 @@ sap.ui.define([
                             INDEX: indexValue,
                             IMAGE_NAME: img.IMAGE_NAME
                         }]));
-        
+
                         // 5. Sube la imagen al backend
                         let response = await fetch(host + "/ImageMaterialReceptionItem", {
                             method: "POST",
                             body: formData
                         });
-        
+
                         if (response.ok) {
                             await indexedDBService.markImageAsSynced(img.id || img.IMAGE_NAME);
                             successCount++;
@@ -181,7 +181,7 @@ sap.ui.define([
                         errorCount++;
                     }
                 }
-        
+
                 sap.m.MessageToast.show(`Sincronización de imágenes finalizada. ${successCount} exitosas, ${errorCount} con error.`);
             });
         },
@@ -196,9 +196,9 @@ sap.ui.define([
                     sap.m.MessageToast.show("No hay firmas pendientes por sincronizar.");
                     return;
                 }
-        
+
                 let successCount = 0, errorCount = 0;
-        
+
                 for (let op of signatureOps) {
                     try {
                         if (op.opType === "create") {
@@ -211,7 +211,7 @@ sap.ui.define([
                                 ia[i] = byteString.charCodeAt(i);
                             }
                             let blob = new Blob([ab], { type: sign.mimeType || "image/jpeg" });
-        
+
                             // 2. Arma FormData igual que uploadSignature
                             let formData = new FormData();
                             formData.append("image", blob, "signature.jpeg");
@@ -221,13 +221,13 @@ sap.ui.define([
                                 PROCESS: sign.PROCESS,
                                 SUBPROCESS: sign.SUBPROCESS
                             }]));
-        
+
                             // 3. Sube la firma al backend
                             let response = await fetch(host + "/ImageSignItem", {
                                 method: "POST",
                                 body: formData
                             });
-        
+
                             if (response.ok) {
                                 // Marca como sincronizada y elimina de pendientes
                                 await indexedDBService.markSignatureAsSynced(sign.id);
@@ -263,7 +263,7 @@ sap.ui.define([
                         console.error("Error al sincronizar firma pendiente:", err);
                     }
                 }
-        
+
                 sap.m.MessageToast.show(`Sincronización de firmas finalizada. ${successCount} exitosas, ${errorCount} con error.`);
             });
         },
@@ -509,6 +509,7 @@ sap.ui.define([
         },
         */
         // Offline
+        /*
         onGetGeneralData: async function (bAppend = false) {
             try {
                 let oModel = this.getView().getModel("serviceModel");
@@ -615,7 +616,7 @@ sap.ui.define([
                             const aCurrentData = oModel.getProperty("/generalData") || [];
                             const aUpdatedData = bAppend ? aCurrentData.concat(responseData.result) : responseData.result;
                             this.onUpdateFinishedTable(aUpdatedData.length);
-                            oModel.setProperty("/generalData", this._getFormatData(aUpdatedData));
+                            oModel.setProperty("/generalData", await this._getFormatData(aUpdatedData));
                             oController.bIsLoading = false;
                         } else {
                             const aDataResult = [];
@@ -629,7 +630,7 @@ sap.ui.define([
                 } else {
                     // --- Modo OFFLINE: Cargar desde IndexedDB ---
                     let localData = await indexedDBService.getAll(indexedDBService.STORE_NAMES.scheduleLine);
-                    oModel.setProperty("/generalData", this._getFormatData(localData));
+                    oModel.setProperty("/generalData", await this._getFormatData(localData));
                     this.onUpdateFinishedTable(localData.length);
                     this.bIsLoading = false;
                     sap.m.MessageToast.show("Datos cargados en modo offline");
@@ -639,7 +640,152 @@ sap.ui.define([
                 sap.m.MessageToast.show("Error al cargar datos (offline/online)");
             }
         },
+        */
+        
+        onGetGeneralData: async function (bAppend = false) {
+            try {
+                let oModel = this.getView().getModel("serviceModel");
+                const oTable = this.byId("progrAlmacenTable");
 
+                // Usa window.navigator.onLine para detectar estado de red consistente
+                if (window.navigator.onLine) {
+                    // --- Modo ONLINE: Obtener del backend y guardar en IndexedDB ---
+                    let url;
+                    let sTop = "";
+                    const oController = this;
+                    var bFilter = false;
+                    var sDates = "";
+
+                    if ([aIdEBELN, aIdPSPNR, aIdCONTRA, aIdUSER].every(val => val?.length === 0)) {
+                        url = `${host}/ScheduleLine`;
+                    } else {
+                        url = this.createUrl();
+                        bFilter = true;
+                    }
+
+                    var sTypeProg = this.byId("idTipoSelect").getSelectedKey();
+                    if (sSelectedTab !== "All") {
+                        var sTabInd = this._getFilterTabIndicator(sSelectedTab);
+                        if (bFilter) {
+                            url = url + " AND (RE_TYPE EQ '" + sTypeProg + "')";
+                        } else {
+                            url = url + "?$filter=(RE_TYPE EQ '" + sTypeProg + "')";
+                        }
+                        url = url + "&$virtualFilter=GENERAL_STATUS EQ '" + sTabInd + "'";
+                        bFilter = true;
+                    } else {
+                        if (bFilter) {
+                            url = url + " AND (RE_TYPE EQ '" + sTypeProg + "')";
+                        } else {
+                            url = url + "?$filter=(RE_TYPE EQ '" + sTypeProg + "')";
+                            bFilter = true;
+                        }
+                    }
+
+                    if ((oTop !== "" || oTop !== undefined) && (oSkip !== "" || oSkip !== undefined)) {
+                        sTop = "$top=" + oTop + "&$skip=" + oSkip;
+                    }
+
+                    if (vInitialDate && vFinalDate) {
+                        sDates = "(CREATED_AT BETWEEN '" + vInitialDate + "' AND '" + vFinalDate + "')";
+                    }
+
+                    if (bFilter && sDates) {
+                        url = url + " AND " + sDates;
+                    } else {
+                        if (sDates) {
+                            url = url + "?$filter=" + sDates;
+                            bFilter = true;
+                        }
+                    }
+
+                    if (sTop) {
+                        if (bFilter) {
+                            url = url + "&" + sTop;
+                        } else {
+                            url = url + "?" + sTop;
+                        }
+                    }
+
+                    let response = await fetch(url, { method: "GET" });
+                    if (!response.ok) throw new Error(`${response.error}`);
+                    let responseData = await response.json();
+
+                    if (response.status === 200) {
+                        if (responseData.error === undefined) {
+                            // ========= 1. Guardar ScheduleLine principal =========
+                            const payload = responseData.result.map(obj => ({
+                                ...obj,
+                                id: obj.EBELN // IndexedDB necesita un campo 'id' único
+                            }));
+                            await indexedDBService.saveBulk(indexedDBService.STORE_NAMES.scheduleLine, payload);
+
+                            // ========= 2. Precarga masiva de detalles: CARGA TODOS LOS DETALLES =========
+                            let itemsToPreload = responseData.result;
+                            let detailsToSave = [];
+                            for (const item of itemsToPreload) {
+                                try {
+                                    let ebeln = item.EBELN;
+                                    let detailUrl = `${host}/ScheduleLine/${ebeln}`;
+                                    let detailResponse = await fetch(detailUrl, { method: "GET" });
+                                    let detailData = await detailResponse.json();
+                                    // Guarda el detalle en IndexedDB
+                                    detailsToSave.push({ id: ebeln, ...detailData.response });
+                                } catch (err) {
+                                    // Si falla, continúa con el siguiente
+                                    console.warn(`No se pudo precargar el detalle para EBELN ${item.EBELN}:`, err);
+                                }
+                            }
+                            if (detailsToSave.length > 0) {
+                                await indexedDBService.saveBulk(indexedDBService.STORE_NAMES.scheduleLineDetail, detailsToSave);
+                            }
+                            // ========= 3. Fin precarga masiva =========
+
+                            if (oController.iTotalItems === null) {
+                                oController.iTotalItems = responseData.result.length;
+                            } else {
+                                oController.iTotalItems = oController.iTotalItems + responseData.result.length;
+                            }
+                            const aCurrentData = oModel.getProperty("/generalData") || [];
+                            const aUpdatedData = bAppend ? aCurrentData.concat(responseData.result) : responseData.result;
+                            this.onUpdateFinishedTable(aUpdatedData.length);
+                            oModel.setProperty("/generalData", await this._getFormatData(aUpdatedData));
+                            oController.bIsLoading = false;
+                        } else {
+                            const aDataResult = [];
+                            this.onUpdateFinishedTable(aDataResult.length);
+                            oModel.setProperty("/generalData", aDataResult);
+                            oController.iTotalItems = aDataResult.length;
+                            oController.bIsLoading = false;
+                            sap.m.MessageToast.show(responseData.error);
+                        }
+                    }
+                    // Activa growing en modo online
+                    /*
+                    if (oTable) {
+                        oTable.setGrowing(true);
+                    }
+                    */
+                } else {
+                    // --- Modo OFFLINE: Cargar desde IndexedDB ---
+                    let localData = await indexedDBService.getAll(indexedDBService.STORE_NAMES.scheduleLine);
+                    oModel.setProperty("/generalData", await this._getFormatData(localData));
+                    this.onUpdateFinishedTable(localData.length);
+                    this.bIsLoading = false;
+                    sap.m.MessageToast.show("Datos cargados en modo offline");
+                    // Desactiva growing en modo offline
+                    /*
+                    if (oTable) {
+                        oTable.setGrowing(false);
+                    }
+                    */
+                }
+            } catch (error) {
+                console.error(error);
+                sap.m.MessageToast.show("Error al cargar datos (offline/online)");
+            }
+        },
+        
         /*
         _getFilterTabIndicator: function (sTab) {
             var sRet = "";
@@ -684,7 +830,7 @@ sap.ui.define([
             }
             return sRet;
         },
-
+        /*
         _getFormatData: function (aData) {
             var that = this;
             let conditions = [];
@@ -742,6 +888,85 @@ sap.ui.define([
                             sFixStatusText = i18.getText("REC_TOTAL");
                             iFixId = 2;
                         }
+                    }
+                }
+                if (sFixStatusText) {
+                    var oFixObj = that._getStatusObj(iFixId);
+                    oItem["FIXED_TEXT"] = sFixStatusText;
+                    oItem["FIXED_ICON"] = oFixObj.STATUS_ICON;
+                    oItem["FIXED_STATE"] = oFixObj.STATUS_STATE;
+                } else {
+                    var oFixObj = that._getStatusObj();
+                    oItem["FIXED_TEXT"] = sFixStatusText;
+                    oItem["FIXED_ICON"] = oFixObj.STATUS_ICON;
+                    oItem["FIXED_STATE"] = oFixObj.STATUS_STATE;
+                }
+            });
+            return aData;
+        },
+        */
+        // Offline
+        _getFormatData: async function (aData) {
+            var that = this;
+            let conditions = [];
+
+            function addCondition(field, values) {
+                if (values && values.length > 0) {
+                    let condition = values.map(value => `${field} EQ '${value}'`).join(" OR ");
+                    conditions.push(`${condition}`);
+                }
+            }
+
+            var aEBELN = [];
+            aData.forEach(function (oItem) {
+                aEBELN.push(oItem.EBELN);
+            });
+            addCondition("XBLNR", aEBELN);
+
+            var aFixedData = [];
+            if (conditions.length > 0) {
+                if (window.navigator.onLine) {
+                    var sFilter = "/FixedAsset?$filter=" + conditions[0];
+                    var sUrl = `${host}` + sFilter;
+                    var aResult = this.getDataRangesSynchronously(sUrl);
+                    if (aResult && aResult.result) {
+                        aFixedData = aResult.result;
+                    }
+                } else {
+                    // OFFLINE: busca los FixedAsset en IndexedDB
+                    const indexedDBService = await sap.ui.require("com/xcaret/regactivosfijos/model/indexedDBService");
+                    // Obtén todos los ScheduleLineDetail (o el store adecuado de FixedAsset si lo tienes)
+                    let allFixed = await indexedDBService.getAll(indexedDBService.STORE_NAMES.scheduleLineDetail);
+                    // Filtra los que correspondan a los EBELN de aData
+                    aFixedData = allFixed.filter(item => aEBELN.includes(item.XBLNR));
+                }
+            }
+
+            const i18 = this.getOwnerComponent().getModel("i18n").getResourceBundle();
+            aData.forEach(function (oItem) {
+                let iStat = parseInt(oItem.GENERAL_STATUS);
+                let oObj = that._getStatusObj(iStat);
+                oItem["STATUS_TEXT"] = oObj.STATUS_TEXT;
+                oItem["STATUS_ICON"] = oObj.STATUS_ICON;
+                oItem["STATUS_STATE"] = oObj.STATUS_STATE;
+                var sDate = "";
+                if (oItem.CREATED_AT) {
+                    sDate = that.getStringDate(new Date(oItem.CREATED_AT));
+                }
+                oItem["CREATED_AT_DATE"] = sDate;
+
+                //Fixed Asset Status
+                var sFixStatusText = "";
+                var oFixed = aFixedData.filter(oFix => oFix.XBLNR === oItem.EBELN);
+                var iFixId;
+                if (oFixed && oFixed.length > 0) {
+                    if (oFixed[0].STATUS === "2" || oFixed[0].STATUS === 2) {
+                        sFixStatusText = i18.getText("REC_PARCIAL");
+                        iFixId = 1;
+                    }
+                    if (oFixed[0].STATUS === "3" || oFixed[0].STATUS === 3) {
+                        sFixStatusText = i18.getText("REC_TOTAL");
+                        iFixId = 2;
                     }
                 }
                 if (sFixStatusText) {
